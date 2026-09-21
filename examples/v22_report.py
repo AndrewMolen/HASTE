@@ -49,7 +49,7 @@ def _new_page(pdf_title):
              ha="right", va="bottom")
     fig.add_artist(matplotlib.lines.Line2D([0.08, 0.92], [0.952, 0.952],
                                            color=INK, lw=1.0))
-    fig.text(0.08, 0.028, "V2.2 injector trade study  ·  n2o-injector-sizing",
+    fig.text(0.08, 0.028, "V2.2 injector trade study  ·  HASTE",
              fontsize=7, color=LIGHT)
     return fig
 
@@ -730,7 +730,7 @@ def build(path=None):
         d["Title"] = "V2.2 injector trade study - oxidiser flow vs O/F and Isp"
         d["Author"] = "Molen"
         d["Subject"] = "Injector sizing for 1.0-1.5 kg/s N2O on the V2.2 hybrid"
-        d["Creator"] = "n2o-injector-sizing"
+        d["Creator"] = "HASTE"
         d["CreationDate"] = datetime.now()
     return path
 

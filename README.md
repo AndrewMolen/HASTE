@@ -1,4 +1,6 @@
-# N2O / Paraffin Hybrid — Injector Sizing Tool
+# HASTE
+
+*N2O / paraffin hybrid — injector sizing tool*
 
 Sizes a multi-hole orifice plate for a liquid nitrous oxide injector on a
 N2O/paraffin hybrid rocket motor, modelling the two-phase flashing flow that

@@ -550,7 +550,7 @@ def build_plate_drawing(fig, layout, meta=None, version=""):
         s.text(tb_x + 3, ry, label, h=1.9, color=LIGHT)
         s.text(tb_x + 24, ry, value, h=2.2)
         ry -= 4.3
-    src = "n2o-injector-sizing" + (f" v{version}" if version else "")
+    src = "HASTE" + (f" v{version}" if version else "")
     if m.flow_model:
         src += f" — {m.flow_model} model, Cd {layout.Cd:.3f}"
     s.text(tb_x + 3, M + 2.5, src, h=1.8, color=LIGHT)

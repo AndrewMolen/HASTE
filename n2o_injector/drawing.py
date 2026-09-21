@@ -280,7 +280,7 @@ def write_hole_table_csv(path: str, layout: PlateLayout,
                 f"L/D {layout.L_over_D:.2f}, Cd assumed {layout.Cd:.3f}\n")
         f.write(f"# min web between holes {layout.min_web:.3f}, "
                 f"edge margin {layout.edge_margin:.3f}\n")
-        f.write(f"# generated {m.date} by n2o-injector-sizing\n")
+        f.write(f"# generated {m.date} by HASTE\n")
         cols = ["hole", "ring", "x_mm", "y_mm", "radius_mm", "angle_deg",
                 "diameter_mm", "depth"]
         f.write(",".join(cols) + "\n")
@@ -406,7 +406,7 @@ def write_dxf(path: str, layout: PlateLayout, meta: DrawingMeta | None = None,
             lines.append(f"SIZED WITH {m.flow_model} MODEL, Cd {layout.Cd:.3f}")
         if m.project:
             lines.append(f"PROJECT {m.project}")
-        lines.append(f"GENERATED {m.date} BY n2o-injector-sizing")
+        lines.append(f"GENERATED {m.date} BY HASTE")
         for i, s in enumerate(lines):
             parts.append(_text(-R, ty + (len(lines) - i - 1) * h * 1.8, h, s, "ANNOTATION"))
 
