@@ -119,6 +119,28 @@ def self_test() -> int:
 
         import matplotlib
         lines.append(f"matplotlib {matplotlib.__version__} backend={matplotlib.get_backend()}")
+
+        # The drawing exports pull in the Agg canvas, the PDF writer and the
+        # font cache -- all things a frozen bundle can be missing -- so they
+        # are exercised here rather than discovered by a user at the shop.
+        import tempfile
+
+        from n2o_injector import layout_from_plate, write_dxf, write_hole_table_csv
+        from n2o_injector.plots import save_plate_drawing
+
+        lay = layout_from_plate(res.plate, grain_od_mm=cfg.grain.outer_d * 1e3)
+        assert lay.n_holes == res.plate.n_holes, "drawing lost a hole"
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ("plate.png", "plate.pdf"):
+                p = os.path.join(tmp, name)
+                save_plate_drawing(p, lay)
+                assert os.path.getsize(p) > 2000, f"{name} came out empty"
+            write_dxf(os.path.join(tmp, "plate.dxf"), lay)
+            write_hole_table_csv(os.path.join(tmp, "plate.csv"), lay)
+        lines.append(
+            f"drawing: {lay.n_holes} holes on {len(lay.rings)} ring(s), "
+            f"min web {lay.min_web:.2f} mm, DXF/CSV/PNG/PDF written"
+        )
     except Exception:
         ok = False
         lines.append("FAILED\n" + traceback.format_exc())

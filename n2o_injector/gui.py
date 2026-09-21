@@ -25,12 +25,28 @@ from .hrap_io import (
     load_hrap_output,
 )
 from .injector import FlowModel, OrificeCurve, SaturationTable
-from .motor import Grain, InjectorSpec, MotorConfig, Nozzle, Tank, simulate
+from .motor import (
+    CHAMBER_MODES,
+    Grain,
+    InjectorSpec,
+    MotorConfig,
+    Nozzle,
+    Tank,
+    simulate,
+)
+from .drawing import (
+    default_meta,
+    suggested_filename,
+    write_dxf,
+    write_hole_table_csv,
+)
 from .plots import (
     build_comparison_figure,
     build_hrap_overlay_figure,
     build_injector_figure,
+    build_plate_drawing,
     build_results_figure,
+    save_plate_drawing,
 )
 from .propellant import FUEL_PRESETS, Propellant
 from .properties import coolprop_available, get_backend
@@ -42,6 +58,7 @@ from .report import (
 )
 from .config_io import load_config, save_config
 from .sizing import SizingTarget, analyse_geometry, size_injector
+from . import __version__
 
 BAR = 1e5
 
@@ -107,6 +124,8 @@ class App(ttk.Frame):
         self._queue: queue.Queue = queue.Queue()
         self._result = None
         self._cfg = None
+        self._plate_layout = None
+        self._plate_meta = None
         self._props_name = ""
         self._table = None
         self._props = None
@@ -198,17 +217,16 @@ class App(ttk.Frame):
                              "Held fixed when solving for hole count.")
         self.f_dmin = Field(s, 5, "Min drillable dia", 0.80, "mm",
                             "Manufacturing minimum; the tool flags designs below it.")
-        self.f_plated = Field(s, 7, "Plate diameter", 0.0, "mm",
-                             "Outer diameter of the orifice plate, used only for the "
-                             "Plate layout drawing. Leave 0 to use the grain outer "
-                             "diameter.")
         self.f_ldref = Field(s, 6, "L/D reference", 5.0, "",
                              "Only used by the L/D-weighted Dyer variant.")
+        self.f_plated = Field(s, 7, "Plate diameter", 0.0, "mm",
+                              "Outer diameter of the orifice plate, used only for the "
+                              "Plate drawing. Leave 0 to use the grain outer diameter.")
 
         self.fix_var = tk.StringVar(value="n_holes")
-        ttk.Label(s, text="Solve for").grid(row=7, column=0, sticky="w", padx=(6, 4))
+        ttk.Label(s, text="Solve for").grid(row=8, column=0, sticky="w", padx=(6, 4))
         fr = ttk.Frame(s)
-        fr.grid(row=7, column=1, columnspan=2, sticky="w")
+        fr.grid(row=8, column=1, columnspan=2, sticky="w")
         ttk.Radiobutton(fr, text="diameter", variable=self.fix_var,
                         value="n_holes").pack(side="left")
         ttk.Radiobutton(fr, text="count", variable=self.fix_var,
@@ -337,11 +355,15 @@ class App(ttk.Frame):
         self.chamber_var = tk.StringVar(value="quasi-steady")
         ttk.Label(s, text="Chamber model").grid(row=3, column=0, sticky="w", padx=(6, 4))
         ccb = ttk.Combobox(s, textvariable=self.chamber_var, state="readonly", width=18,
-                           values=["quasi-steady", "transient"])
+                           values=list(CHAMBER_MODES))
         ccb.grid(row=3, column=1, columnspan=2, sticky="ew", padx=(0, 6), pady=1)
-        _Tooltip(ccb, "quasi-steady: solves Pc from the nozzle relation each step "
-                      "(robust, recommended for sizing).\n"
-                      "transient: HRAP's chamber ODE, for direct HRAP comparison.")
+        _Tooltip(ccb, "quasi-steady: solves Pc from the nozzle relation each step. "
+                      "Timestep-independent; recommended for sizing.\n"
+                      "transient: the chamber fill ODE, integrated in ratio form "
+                      "with sub-stepping. Use it for the ignition ramp and tail-off.\n"
+                      "transient-hrap: HRAP's own forward-Euler discretisation, for "
+                      "bit-level HRAP comparison only -- its ignition ramp scales "
+                      "with the timestep rather than with the chamber.")
 
     def _build_actions(self, parent):
         ttk.Separator(parent, orient="horizontal").pack(fill="x", pady=(2, 0))
@@ -433,13 +455,36 @@ class App(ttk.Frame):
         self.sweep_canvas.get_tk_widget().pack(fill="both", expand=True)
         NavigationToolbar2Tk(self.sweep_canvas, sf).update()
 
-        # injector plate layout
+        # injector plate drawing
         pf = ttk.Frame(nb)
-        nb.add(pf, text="Plate layout")
-        self.plate_fig = Figure(figsize=(8, 8), dpi=100, layout="constrained")
+        nb.add(pf, text="Plate drawing")
+
+        bar = ttk.Frame(pf)
+        bar.pack(fill="x", padx=4, pady=(4, 0))
+        ttk.Label(bar, text="Part no").pack(side="left")
+        self.dwg_part = tk.StringVar(value="")
+        ttk.Entry(bar, textvariable=self.dwg_part, width=16).pack(side="left", padx=(3, 8))
+        ttk.Label(bar, text="Material").pack(side="left")
+        self.dwg_material = tk.StringVar(value="")
+        ttk.Entry(bar, textvariable=self.dwg_material, width=16).pack(side="left", padx=(3, 8))
+        ttk.Button(bar, text="Redraw", width=8,
+                   command=self._redraw_plate).pack(side="left", padx=2)
+        ttk.Button(bar, text="Save sheet...", width=14,
+                   command=self._save_drawing).pack(side="right", padx=2)
+        ttk.Button(bar, text="Export DXF...", width=14,
+                   command=self._export_dxf).pack(side="right", padx=2)
+        ttk.Button(bar, text="Hole table .csv...", width=16,
+                   command=self._export_hole_table).pack(side="right", padx=2)
+
+        # A4 landscape, so the tab shows the sheet at its true proportions.
+        self.plate_fig = Figure(figsize=(11.69, 8.27), dpi=100)
         self.plate_canvas = FigureCanvasTkAgg(self.plate_fig, master=pf)
         self.plate_canvas.get_tk_widget().pack(fill="both", expand=True)
         NavigationToolbar2Tk(self.plate_canvas, pf).update()
+        # Text heights are in sheet millimetres, so the sheet has to be rebuilt
+        # when the tab is resized or the lettering drifts out of proportion.
+        self.plate_canvas.mpl_connect("resize_event", self._plate_resized)
+        self._plate_resize_job = None
 
         # HRAP cross-reference
         hf = ttk.Frame(nb)
@@ -582,8 +627,9 @@ class App(ttk.Frame):
         if imported.warnings:
             msg += "\n\nWarnings:\n" + "\n".join(f"  - {w}" for w in imported.warnings)
         msg += (
-            "\n\nThe injector model was set to SPI and the chamber to transient, "
-            "which is what HRAP itself uses. Run the sizing or comparison now."
+            "\n\nThe injector model was set to SPI and the chamber to "
+            "transient-hrap, which reproduces HRAP's own physics and its "
+            "forward-Euler discretisation. Run the sizing or comparison now."
         )
         messagebox.showinfo("HRAP motor imported", msg)
         self.status.configure(
@@ -900,13 +946,7 @@ class App(ttk.Frame):
         build_results_figure(self.fig, res, cfg)
         self.canvas.draw()
 
-        try:
-            pd_mm = self.f_plated.get()
-        except Exception:
-            pd_mm = 0.0
-        build_injector_figure(self.plate_fig, res.plate, plate_d_mm=pd_mm,
-                              grain_od_mm=cfg.grain.outer_d * 1e3)
-        self.plate_canvas.draw()
+        self._draw_plate(res, cfg)
 
         flag = "" if res.dP_margin_ok else "  [dP margin LOW]"
         colour = "#060" if (res.dP_margin_ok and not res.warnings) else "#a60"
@@ -916,6 +956,131 @@ class App(ttk.Frame):
             foreground=colour,
         )
         self.nb.select(0)
+
+    # ------------------------------------------------------- plate drawing
+
+    def _draw_plate(self, res=None, cfg=None):
+        """Rebuild the plate drawing sheet and remember its layout."""
+        res = res if res is not None else self._result
+        cfg = cfg if cfg is not None else self._cfg
+        if res is None or cfg is None:
+            return
+        try:
+            pd_mm = self.f_plated.get()
+        except Exception:
+            pd_mm = 0.0
+        self._plate_meta = default_meta(
+            cfg, model_name=cfg.injector.model.value,
+            part_no=self.dwg_part.get().strip(),
+        )
+        self._plate_meta.material = self.dwg_material.get().strip()
+        self._plate_meta.drawn_by = ""
+        self._plate_layout = build_injector_figure(
+            self.plate_fig, res.plate, plate_d_mm=pd_mm,
+            grain_od_mm=cfg.grain.outer_d * 1e3,
+            meta=self._plate_meta, version=__version__,
+        )
+        self.plate_canvas.draw()
+
+    def _redraw_plate(self):
+        if self._result is None:
+            messagebox.showinfo("Nothing to draw", "Run a sizing computation first.")
+            return
+        self._draw_plate()
+        self.status.configure(text="Plate drawing updated.", foreground="#060")
+
+    def _plate_resized(self, _event=None):
+        """Re-render after a resize, debounced so dragging stays smooth."""
+        if self._plate_layout is None:
+            return
+        if self._plate_resize_job is not None:
+            try:
+                self.after_cancel(self._plate_resize_job)
+            except Exception:
+                pass
+        self._plate_resize_job = self.after(250, self._resize_redraw)
+
+    def _resize_redraw(self):
+        self._plate_resize_job = None
+        if self._plate_layout is None:
+            return
+        build_plate_drawing(self.plate_fig, self._plate_layout,
+                            meta=self._plate_meta, version=__version__)
+        self.plate_canvas.draw_idle()
+
+    def _plate_ready(self):
+        if self._plate_layout is None:
+            messagebox.showinfo("No plate yet",
+                                "Run a sizing computation first -- the drawing is "
+                                "generated from the sized plate.")
+            return False
+        # Pick up any edits to the part number or material without a redraw.
+        self._plate_meta.part_no = self.dwg_part.get().strip()
+        self._plate_meta.material = self.dwg_material.get().strip()
+        return True
+
+    def _suggest(self, ext):
+        return suggested_filename(self._plate_layout, ext, self.dwg_part.get().strip())
+
+    def _save_drawing(self):
+        """Write the sheet itself as PNG, PDF or SVG at true A4 size."""
+        if not self._plate_ready():
+            return
+        path = filedialog.asksaveasfilename(
+            title="Save drawing sheet",
+            initialfile=self._suggest(".pdf"), defaultextension=".pdf",
+            filetypes=[("PDF (vector, prints to scale)", "*.pdf"),
+                       ("PNG image", "*.png"), ("SVG (vector)", "*.svg"),
+                       ("All", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            save_plate_drawing(path, self._plate_layout, meta=self._plate_meta,
+                               version=__version__, dpi=300)
+        except Exception as exc:
+            messagebox.showerror("Save failed", str(exc))
+            return
+        self.status.configure(
+            text=f"Drawing saved to {path} (A4 landscape; print at 100% for scale).",
+            foreground="#060")
+
+    def _export_dxf(self):
+        if not self._plate_ready():
+            return
+        path = filedialog.asksaveasfilename(
+            title="Export DXF for CAD / CAM",
+            initialfile=self._suggest(".dxf"), defaultextension=".dxf",
+            filetypes=[("DXF R12", "*.dxf"), ("All", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            write_dxf(path, self._plate_layout, meta=self._plate_meta)
+        except Exception as exc:
+            messagebox.showerror("Export failed", str(exc))
+            return
+        self.status.configure(
+            text=f"DXF written to {path} -- full scale in mm, layers "
+                 "PLATE_OUTLINE / HOLES / CENTRELINES / SECTION / ANNOTATION.",
+            foreground="#060")
+
+    def _export_hole_table(self):
+        if not self._plate_ready():
+            return
+        path = filedialog.asksaveasfilename(
+            title="Export hole coordinate table",
+            initialfile=self._suggest(".csv"), defaultextension=".csv",
+            filetypes=[("CSV", "*.csv"), ("All", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            write_hole_table_csv(path, self._plate_layout, meta=self._plate_meta)
+        except Exception as exc:
+            messagebox.showerror("Export failed", str(exc))
+            return
+        self.status.configure(text=f"Hole table written to {path}", foreground="#060")
 
     def _export(self, kind):
         if self._result is None:

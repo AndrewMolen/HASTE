@@ -41,8 +41,15 @@ hiddenimports = [
     # not follow it -- without this the bundle builds cleanly but ships no
     # application code at all and fails at launch.
     *collect_submodules("n2o_injector"),
-    # The GUI's only backend; PyInstaller cannot infer it from the imports.
+    # The on-screen backend; PyInstaller cannot infer it from the imports.
     "matplotlib.backends.backend_tkagg",
+    # Saving the plate drawing picks a writer backend by file extension at
+    # call time -- a dynamic import static analysis cannot see. Without these
+    # the GUI runs but "Save sheet" fails on .pdf and .svg in the frozen build
+    # only, which is the worst place to find out.
+    "matplotlib.backends.backend_agg",
+    "matplotlib.backends.backend_pdf",
+    "matplotlib.backends.backend_svg",
     "PIL._tkinter_finder",
     # scipy.io.loadmat is used for HRAP .mat interop and is imported lazily
     # inside functions, so static analysis misses it.
@@ -75,8 +82,9 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={
-        # Ship only the TkAgg backend rather than every backend matplotlib has.
-        "matplotlib": {"backends": ["TkAgg"]},
+        # Ship the on-screen backend plus the three used to write drawings,
+        # rather than every backend matplotlib has.
+        "matplotlib": {"backends": ["TkAgg", "Agg", "PDF", "SVG"]},
     },
     runtime_hooks=[],
     excludes=excludes,

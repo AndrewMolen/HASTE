@@ -333,7 +333,9 @@ def load_hrap_motor(
         ambient_P=num("Pa", 1.0) * unit("Pa_unit", PRESSURE, "atm", "ambient pressure"),
         dt=dt,
         max_time=t_max,
-        chamber_mode="transient" if match_hrap_models else "quasi-steady",
+        # 'transient-hrap' rather than 'transient': matching HRAP means
+        # matching its forward-Euler discretisation too, not just the ODE.
+        chamber_mode="transient-hrap" if match_hrap_models else "quasi-steady",
         chamber_volume=chamber_volume,
         regression_mode=regression_mode,
         const_OF=const_OF,

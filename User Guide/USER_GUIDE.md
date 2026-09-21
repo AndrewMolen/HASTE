@@ -289,6 +289,7 @@ answer is a bigger tank or less oxidiser, not a software workaround.
 | Hole diameter | 1.60 mm | Held fixed if solving for count. |
 | Min drillable dia | 0.80 mm | Manufacturing floor; flagged if violated. |
 | L/D reference | 5.0 | Only used by the L/D-weighted heuristic. Ignore otherwise. |
+| Plate diameter | 0 mm | Plate OD, used by the drawing only (§3.4). 0 = use the grain outer diameter. |
 
 **Solve for: diameter / count.** Pick which one you're free to change. "Diameter"
 fixes hole count and gives you an exact area (but a non-standard drill size).
@@ -368,11 +369,37 @@ time-varying target with `least_squares`.
 ## 2.7 Numerics
 
 **Timestep** 10 ms, **Max sim time** 60 s, **N2O properties** (`esdu` = HRAP
-MATLAB parity; `coolprop` = reference EOS), **Chamber model** (`quasi-steady`
-for sizing; `transient` to match HRAP).
+MATLAB parity; `coolprop` = reference EOS).
 
-> Timestep convergence has **not** been formally studied. If a result matters,
-> halve the timestep and confirm the answer does not move.
+**Chamber model** — three choices, and they are not three theories:
+
+| Mode | What it does | Use it for |
+|---|---|---|
+| `quasi-steady` | Solves `Pc = ṁ c*/(Cd_n A_t)` as a fixed point each step. This is the *steady solution* of the transient equation. | **Sizing.** No timestep sensitivity, no assumed initial `Pc`, no chamber-volume guess. |
+| `transient` | Integrates `dP/P = dṁ_g/m_g − dV/V` in ratio form with sub-stepping. | The ignition ramp and tail-off. |
+| `transient-hrap` | HRAP's own forward-Euler discretisation of the same equation. | Reproducing an HRAP run exactly — its numerics as well as its physics. |
+
+Because quasi-steady is the steady solution of the transient equation, the two
+**must** agree away from ignition and tail-off. If they don't, one is being
+integrated badly rather than telling you something physical.
+
+> **Always refine the timestep before believing a transient number.** Halve
+> `dt` and confirm the answer does not move; the tool does not do this for you.
+> `quasi-steady` is insensitive to `dt` by construction, so the check only
+> really bites on the transient modes.
+>
+> `transient-hrap` deliberately keeps HRAP's dt-dependence, including an
+> ignition ramp whose *duration scales with the timestep*. Don't read startup
+> numbers off it — that is what `transient` is for.
+
+**Chamber volume** matters only to the transient modes: 0 means "port volume
+only", which ignores your pre- and post-chamber. Setting the real free volume
+both improves the ramp and relaxes the timestep you need.
+
+**What the ignition ramp is and isn't.** The transient mode models the chamber
+*filling* — gas accumulating until the nozzle can pass it. It does not model
+igniter energy, flame spread, or oxidiser pooling before light. So it gives you
+the idealised fill shape and its timescale; it will not predict a hard start.
 
 ---
 
@@ -418,7 +445,64 @@ Read it for two things:
 - **Where HEM flattens** — that is your choking point (§1.4). Chamber pressure
   below it means the injector is isolating the feed system.
 
-## 3.4 Warning decoder
+## 3.4 The plate drawing tab
+
+This is the tab you send to a machine shop. It renders the sized plate as an A4
+landscape drawing sheet and exports it three ways.
+
+**What is on the sheet**
+
+| Part of the sheet | What it tells you |
+|---|---|
+| Plan view | The plate as seen **from the inlet (upstream) face**, at a standard scale (1:1 wherever the plate fits the sheet). |
+| Ring data | Each bolt circle: diameter, hole count, angular pitch, and the stagger applied to it. |
+| Edge view | Plate thickness with the holes projected — a visual check that L/D is what you meant. |
+| Hole table | Every hole as X/Y from the plate centre, plus polar R and angle. |
+| Notes | Datum, tolerance sensitivity, Cd assumption, min web, edge margin. |
+| Title block | Project, part no, material, scale, date, flow model and Cd used. |
+
+**Two fields above the drawing.** *Part no* and *Material* fill the title block
+and name the exported files; both are optional. *Plate diameter* (in the
+injector input panel) sets the plate OD — leave it at 0 and the grain outer
+diameter is used, which is the usual envelope.
+
+**Hole placement.** Holes go on concentric bolt circles, with the count on each
+ring proportional to its circumference and alternate rings rotated by half a
+pitch. That staggering is not cosmetic: it is what keeps the web between rings
+open, and it is how a plate is actually drilled. The tool does *not* optimise
+the spray pattern — impingement, film cooling and atomisation are not modelled
+anywhere in this program, so treat the layout as a manufacturable default, not
+an injector design.
+
+**The three exports**
+
+- **Save sheet** — PDF, PNG or SVG. Use PDF and **print at 100 %**; the sheet
+  carries a 50 mm check bar so the shop can confirm the print was not scaled
+  before measuring anything off it.
+- **Export DXF** — DXF R12, full scale, millimetres, origin at the plate
+  centre. Geometry sits on named layers (`PLATE_OUTLINE`, `HOLES`,
+  `HOLE_CENTRES`, `CENTRELINES`, `SECTION`, `ANNOTATION`); turn off the last
+  two and you have just the outline and the holes to extrude or to use as drill
+  targets. R12 is deliberate — it is the revision every CAD and CAM package
+  still reads.
+- **Hole table .csv** — the coordinate list for a DRO, a CMM or a CAM package
+  that prefers points to geometry. The header states the datum and units,
+  because a bare coordinate list is how plates get drilled mirrored.
+
+**Two numbers decide whether it can be made.** *Min web* is the smallest
+edge-to-edge gap between any two holes; if it goes negative the holes intersect
+and the sheet says so in red. *Edge margin* is the gap from the outermost hole
+to the rim. If either is marginal, reduce the hole count (and increase the
+diameter) or use a larger plate.
+
+**The tolerance argument, in advance.** Flow area goes as *d*², so the sheet
+computes what a hole-diameter error costs you: on a ⌀1.381 mm hole, +0.02 mm is
++2.9 % area — and, since the injector is the flow-metering element, ~+2.9 %
+oxidiser flow and a shifted O/F. Twenty holes drilled 0.02 mm oversize is not a
+rounding error, it is a different motor. Decide the tolerance before the plate
+is cut.
+
+## 3.5 Warning decoder
 
 | Message | Meaning | Do |
 |---|---|---|
@@ -432,6 +516,8 @@ Read it for two things:
 | `instantaneous O/F deviates…by up to X%` | Large drift across the burn. | Decide whether the ends are acceptable. |
 | `injector pressure drop is very high (X%)` | Over-restrictive; wasting tank pressure. | Consider a larger injector. |
 | `rounding N holes to M changes area by X%` | Integer hole count. | Adjust hole diameter. |
+| `oxidiser flux peaks at X kg/m^2/s, above the ~700…` | `a·G^n` is being extrapolated past the range the correlation was fitted over. | Open the grain ports — `G_ox` is set by port area, not by the injector. Or accept it and say so. |
+| `oxidiser flux peaks at only X…below the ~50…` | Flux too low for the power law; radiation matters. | Smaller ports or more flow. |
 | `fuel web burned through` | Grain ran out before oxidiser. | Thicker web or shorter burn. |
 | `liquid oxidiser exhausted at t = …` | Normal end of a blowdown burn. | None — expected. |
 

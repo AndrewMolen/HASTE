@@ -23,8 +23,21 @@ Chamber pressure can be evaluated two ways:
     has no ignition transient and no dependence on an assumed initial ``Pc``.
 
 ``transient``
-    HRAP's chamber ODE, ``dP = P (dm_g/m_g - dV/V)``, integrated with the same
-    forward-Euler scheme HRAP uses, for direct comparison against an HRAP run.
+    The same chamber ODE, ``dP/P = dm_g/m_g - dV/V``, but integrated in the
+    form it actually has.  The equation says ``P`` is proportional to
+    ``m_g/V``, so a step is taken as the exact ratio
+    ``P_new = P_old (m_g_new/m_g_old)(V_old/V_new)`` rather than as an
+    additive Euler increment, with sub-stepping when the gas inventory changes
+    quickly.  This matters at ignition: the chamber is seeded with air, so
+    ``m_g`` is tiny and ``dm_g/m_g`` is enormous, and an additive step there is
+    limited by the step size rather than by the physics.
+
+``transient-hrap``
+    HRAP's own forward-Euler discretisation of the same ODE, kept verbatim so
+    a comparison against an HRAP run reproduces its numerics as well as its
+    physics.  Use it only for that comparison: its ignition ramp is a function
+    of the timestep, not of the chamber, so the ramp takes a roughly fixed
+    number of steps and its duration scales with ``dt``.
 """
 
 from __future__ import annotations
@@ -37,6 +50,18 @@ from scipy.optimize import brentq
 from .injector import FlowModel, OrificeCurve, SaturationTable
 from .propellant import Propellant
 from .properties import GAMMA_N2O_VAP, R_N2O, PropertyBackend
+
+#: Accepted values for :attr:`MotorConfig.chamber_mode`.
+CHAMBER_MODES = ("quasi-steady", "transient", "transient-hrap")
+
+#: Largest fractional change in chamber gas inventory allowed in one
+#: sub-step of the transient model. The ignition ramp starts from an almost
+#: empty chamber, where the inventory can multiply many times over in a single
+#: outer timestep; splitting the step keeps the nozzle outflow (which depends
+#: on the pressure being solved for) evaluated close to where it applies.
+CHAMBER_SUBSTEP_TOL = 0.05
+#: Cap on sub-steps per outer step, so a pathological config cannot stall.
+CHAMBER_MAX_SUBSTEPS = 256
 
 
 # --------------------------------------------------------------------------
@@ -213,7 +238,9 @@ class MotorConfig:
     ambient_P: float = 101325.0  #: Pa
     dt: float = 0.005  #: s
     max_time: float = 60.0  #: s
-    chamber_mode: str = "quasi-steady"  #: or 'transient'
+    #: ``'quasi-steady'``, ``'transient'`` or ``'transient-hrap'``; see the
+    #: module docstring for what each one integrates.
+    chamber_mode: str = "quasi-steady"
     chamber_volume: float = 0.0  #: m^3; 0 => port volume only (HRAP convention)
     stop_at_liquid_exhausted: bool = True
 
@@ -253,6 +280,11 @@ class MotorConfig:
             errs.append(
                 f"unknown regression mode {self.regression_mode!r} "
                 "(expected 'shifting' or 'constant_OF')"
+            )
+        if self.chamber_mode not in CHAMBER_MODES:
+            errs.append(
+                f"unknown chamber mode {self.chamber_mode!r} (expected one of "
+                + ", ".join(repr(m) for m in CHAMBER_MODES) + ")"
             )
         return errs
 
@@ -476,7 +508,6 @@ def simulate(
             break
 
         sat = props.sat(T)
-        P_tank = sat.P
 
         # Phase split from tank volume and total oxidiser mass.
         m_liq = max(
@@ -493,6 +524,12 @@ def simulate(
 
         # ---- injector ----
         up = props.upstream_state(T, cfg.tank.supercharge_P)
+        # The pressure the injector actually sees. For a self-pressurising tank
+        # this is the saturation pressure; for a supercharged one it is the
+        # supercharge pressure, with the liquid subcooled beneath it. Reporting
+        # the drop against the saturation pressure instead would understate the
+        # margin on a supercharged feed by exactly the supercharge.
+        P_tank = up.P
         liquid_phase = m_liq > 1e-3
         curve = (
             OrificeCurve(
@@ -545,10 +582,9 @@ def simulate(
                 ) * grain.length
             V = max(V, 1e-9)
             dV = grain.burn_perimeter(d) * rdot * grain.length
-            mdot_n = Pc * cfg.nozzle.Cd * cfg.nozzle.throat_area / cstar
-            dm_g = mdot_f + mdot_ox - mdot_n
-            m_gas = max(m_gas + dm_g * dt, 1e-9)
-            Pc = max(Pc + Pc * (dm_g / m_gas - dV / V) * dt, cfg.ambient_P)
+            Pc, m_gas, mdot_n = _chamber_step(
+                cfg, Pc, m_gas, V, dV, mdot_ox, mdot_f, cstar, dt, P_feed=up.P
+            )
 
         k_gas = prop.gamma(OF if np.isfinite(OF) else prop.opt_OF, Pc)
         F = _thrust(cfg, Pc, k_gas)
@@ -608,6 +644,76 @@ def simulate(
     )
 
 
+def _chamber_step(
+    cfg: MotorConfig,
+    Pc: float,
+    m_gas: float,
+    V: float,
+    dV: float,
+    mdot_ox: float,
+    mdot_f: float,
+    cstar: float,
+    dt: float,
+    P_feed: float = 0.0,
+) -> tuple[float, float, float]:
+    """Advance the transient chamber over one timestep.
+
+    Returns ``(Pc, m_gas, mdot_n)``.
+
+    The governing equation is HRAP's
+
+    .. math:: \\frac{dP}{P} = \\frac{dm_g}{m_g} - \\frac{dV}{V}
+
+    whose solution is simply :math:`P \\propto m_g / V`.  Taking the step in
+    that ratio form rather than as :math:`P + P(\\ldots)\\,dt` is what makes
+    the ignition ramp a property of the chamber instead of a property of the
+    timestep: at ignition the chamber holds only its seeded air, so
+    :math:`dm_g/m_g` is of order :math:`10^4\\,\\mathrm{s^{-1}}` and an
+    additive step of any usable size simply multiplies the pressure by a
+    bounded factor each step, which makes the ramp take a fixed *number of
+    steps* and therefore a duration proportional to ``dt``.
+
+    ``'transient-hrap'`` keeps the additive form deliberately, because
+    reproducing an HRAP run means reproducing its discretisation too.
+    """
+    At = cfg.nozzle.Cd * cfg.nozzle.throat_area
+    mdot_in = mdot_ox + mdot_f
+
+    if cfg.chamber_mode == "transient-hrap":
+        mdot_n = Pc * At / cstar
+        dm_g = mdot_in - mdot_n
+        m_gas = max(m_gas + dm_g * dt, 1e-9)
+        Pc = max(Pc + Pc * (dm_g / m_gas - dV / V) * dt, cfg.ambient_P)
+        return Pc, m_gas, mdot_n
+
+    # Split the step so no sub-step changes the inventory by more than
+    # CHAMBER_SUBSTEP_TOL. Away from ignition this is always one sub-step.
+    mdot_n = Pc * At / cstar
+    swing = abs(mdot_in - mdot_n) * dt / max(m_gas, 1e-12)
+    n_sub = int(min(max(1, np.ceil(swing / CHAMBER_SUBSTEP_TOL)), CHAMBER_MAX_SUBSTEPS))
+    h = dt / n_sub
+
+    for _ in range(n_sub):
+        mdot_n = Pc * At / cstar
+        # Oxidiser flow is held at its start-of-step value, which is fine while
+        # the injector is choked but breaks down if the chamber approaches feed
+        # pressure inside one step -- the frozen inflow then keeps filling a
+        # chamber the tank could no longer push into, and Pc runs away above
+        # tank pressure. Tapering the inflow over the last 5% of the available
+        # drop is a numerical guard, not a model of the flow: in a converged
+        # run the chamber never gets there and the taper never engages.
+        taper = 1.0
+        if P_feed > 0.0:
+            taper = min(max((P_feed - Pc) / (0.05 * P_feed), 0.0), 1.0)
+        m_new = max(m_gas + (mdot_f + mdot_ox * taper - mdot_n) * h, 1e-12)
+        V_new = max(V + dV * h, 1e-12)
+        # Exact integral of dP/P = dm_g/m_g - dV/V over the sub-step.
+        Pc = max(Pc * (m_new / m_gas) * (V / V_new), cfg.ambient_P)
+        m_gas, V = m_new, V_new
+
+    return Pc, m_gas, mdot_n
+
+
 def _quasi_steady_Pc(
     cfg: MotorConfig, curve, d: float, T: float, sat, CdA: float, up
 ) -> float:
@@ -619,7 +725,9 @@ def _quasi_steady_Pc(
         if curve is not None:
             mdot_ox = CdA * curve.flux(Pc)
         else:
-            mdot_ox = _vapour_mass_flow(CdA, sat.P, T, sat.Z, Pc)
+            # up.P, not sat.P: the feed pressure is what drives the orifice,
+            # and the two differ on a supercharged tank.
+            mdot_ox = _vapour_mass_flow(CdA, up.P, T, sat.Z, Pc)
         _, mdot_f, OF = fuel_flow(cfg, d, mdot_ox)
         if not np.isfinite(OF):
             OF = prop.opt_OF

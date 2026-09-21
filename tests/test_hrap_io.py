@@ -217,7 +217,7 @@ def test_import_defaults_to_hrap_models(tmp_path):
     """Matching HRAP means SPI flow and the transient chamber ODE."""
     im = load_hrap_motor(_write_cfg(tmp_path), match_hrap_models=True)
     assert im.config.injector.model is FlowModel.SPI
-    assert im.config.chamber_mode == "transient"
+    assert im.config.chamber_mode == "transient-hrap"
 
     im2 = load_hrap_motor(_write_cfg(tmp_path), match_hrap_models=False)
     assert im2.config.injector.model is FlowModel.DYER

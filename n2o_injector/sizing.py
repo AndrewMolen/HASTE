@@ -37,6 +37,13 @@ from .injector import FlowModel, OrificeCurve, check_validity, recommend_model
 from .motor import BurnResult, MotorConfig, fuel_flow, required_mdot_ox, simulate
 from .properties import PropertyBackend
 
+#: Approximate bounds of the oxidiser mass flux range over which published
+#: paraffin regression correlations are fitted, kg/m^2/s. These are soft
+#: bounds on the *data*, not physical limits: outside them ``a G^n`` is an
+#: extrapolation rather than a fit, which is worth saying out loud because the
+#: arithmetic gives an answer either way. See USER_GUIDE.md §1.7.
+GOX_FIT_LO, GOX_FIT_HI = 50.0, 700.0
+
 
 @dataclass
 class SizingTarget:
@@ -669,6 +676,36 @@ def _populate_metrics(
             f"selected model is {cfg.injector.model.value}; based on the resulting "
             f"L/D the recommendation is {rec_model.value}."
         )
+
+    # Oxidiser flux against the range the regression law was fitted over. The
+    # tool will happily evaluate a*G^n at any flux, and the answer looks no
+    # different -- so an extrapolation has to be called out explicitly or it
+    # passes unnoticed. The design consequence is real: G_ox is set by the
+    # grain port, not by the injector, so the fix is never a different plate.
+    if len(burn.G_ox):
+        liq = burn.m_liq > 1e-3
+        G = burn.G_ox[liq] if np.any(liq) else burn.G_ox
+        G = G[np.isfinite(G) & (G > 0)]
+        if len(G):
+            G_hi = float(np.max(G))
+            if G_hi > GOX_FIT_HI:
+                over = 100.0 * float(np.mean(G > GOX_FIT_HI))
+                result.warnings.append(
+                    f"oxidiser flux peaks at {G_hi:.0f} kg/m^2/s, above the "
+                    f"~{GOX_FIT_HI:.0f} kg/m^2/s upper end of the range paraffin "
+                    f"regression correlations are normally fitted over, for {over:.0f}% "
+                    "of the liquid phase. The regression law is being extrapolated, so "
+                    "the fuel flow and O/F here carry more uncertainty than the "
+                    "coefficients alone imply. G_ox is set by the grain port area, not "
+                    "by the injector -- open the ports or accept the extrapolation."
+                )
+            elif G_hi < GOX_FIT_LO:
+                result.warnings.append(
+                    f"oxidiser flux peaks at only {G_hi:.0f} kg/m^2/s, below the "
+                    f"~{GOX_FIT_LO:.0f} kg/m^2/s lower end of the usual correlation "
+                    "range. At low flux, radiation and non-uniform burning matter and "
+                    "the a*G^n law under-predicts."
+                )
 
     # O/F excursion across the burn.
     ok_of = np.isfinite(burn.OF)

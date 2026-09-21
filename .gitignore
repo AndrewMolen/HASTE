@@ -13,6 +13,10 @@ USER_GUIDE.pdf
 VALIDATION.docx
 VALIDATION.pdf
 
+# Raster previews of drawings that are already tracked as vector PDFs --
+# the PNG is 12x the size and carries no extra information.
+Trade Study/*.png
+
 # --- generated run artefacts -------------------------------------------
 examples/output/
 startup_error.log

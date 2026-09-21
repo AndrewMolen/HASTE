@@ -1,0 +1,63 @@
+{
+  "schema": "n2o-injector-config/1",
+  "saved": "2026-09-21T10:05:32",
+  "notes": "V2.2 RECOMMENDED STARTING POINT -- see Trade Study/V2.2_injector_trade_study.pdf. Sized on mdot_ox = 1.0 kg/s (well-conditioned; never inverts the regression law), not on O/F. 41 x 1.20 mm holes in a 12.7 mm plate give L/D 10.58, inside the band where the Waxman/NASA cold-flow data validates HEM. 1.0 kg/s is chosen over the top of the 1.0-1.5 kg/s range because the extra 4.3% Isp there costs 51% more oxidiser flux (already past the fitted correlation range), drops the clean pressure-drop margin from 84% to 60% of the burn, and leaves 7 more points of fuel unburnt. Regression a/n are HRAP defaults and NOT measured: expect O/F anywhere in 4-12. Cold-flow the plate to measure Cd before committing.",
+  "tank": {
+    "volume_L": 7.0,
+    "fill_temp_C": 23.850000000000023,
+    "ox_mass_kg": 4.4803,
+    "supercharge_bar": null
+  },
+  "grain": {
+    "length_mm": 177.79999999999998,
+    "port_id_mm": 17.779999999999998,
+    "outer_d_mm": 85.852,
+    "n_ports": 5
+  },
+  "nozzle": {
+    "throat_d_mm": 30.479999999999997,
+    "expansion_ratio": 4.34028,
+    "Cd": 0.95,
+    "efficiency": 0.9
+  },
+  "injector": {
+    "n_holes": 41,
+    "hole_d_mm": 1.2,
+    "Cd": 0.7,
+    "plate_thickness_mm": 12.7,
+    "min_hole_d_mm": 0.8,
+    "model": "HEM",
+    "ld_ref": 5.0
+  },
+  "propellant": {
+    "name": "Paraffin",
+    "reg_a": 0.0304,
+    "reg_n": 0.681,
+    "reg_m": 0.0,
+    "rho_fuel": 900.0,
+    "opt_OF": 8.27,
+    "cstar_const": 1550.0,
+    "cstar_eff": 1.0,
+    "cea_table_file": "Paraffin.mat"
+  },
+  "run": {
+    "ambient_bar": 1.01325,
+    "dt_ms": 1.0,
+    "max_time_s": 40.0,
+    "chamber_mode": "quasi-steady",
+    "chamber_volume_L": 0.0,
+    "regression_mode": "shifting",
+    "stop_at_liquid_exhausted": false,
+    "tail_cutoff_frac": 1.05,
+    "const_OF": 8.0,
+    "initial_Pc_bar": 1.01325
+  },
+  "target": {
+    "objective": "mdot_ox",
+    "OF": 7.5,
+    "mdot_ox": 1.0,
+    "chamber_P_bar": 30.0,
+    "min_dP_fraction": 0.2,
+    "design_time": 0.0
+  }
+}

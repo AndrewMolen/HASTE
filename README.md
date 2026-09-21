@@ -91,12 +91,22 @@ Tests:
 python -m pytest tests/ -q
 ```
 
-**New here?** Read the [User Guide](USER_GUIDE.md) — background physics, every
-input field, and how to read the output.
+**New here?** Read the [User Guide](User%20Guide/USER_GUIDE.md) — background
+physics, every input field, and how to read the output.
 
-Both the guide and the [validation report](VALIDATION.md) are also available as
-Word/PDF with typeset equations — [USER_GUIDE.docx](USER_GUIDE.docx),
-[VALIDATION.docx](VALIDATION.docx) — rebuildable with:
+A worked example of the whole workflow, end to end on a real motor, is in
+[Trade Study/V2.2_injector_trade_study.pdf](Trade%20Study/V2.2_injector_trade_study.pdf) —
+oxidiser flow against O/F and specific impulse for the V2.2 hybrid, with every
+sensitivity run and the plate drawing it concludes with. Regenerate it with:
+
+```bash
+python examples/v22_report.py
+```
+
+Both the guide and the [validation report](Validation/VALIDATION.md) are also
+available as Word/PDF with typeset equations —
+[USER_GUIDE.docx](User%20Guide/USER_GUIDE.docx),
+[VALIDATION.docx](Validation/VALIDATION.docx) — rebuildable with:
 
 ```bash
 python tools/build_docx.py
@@ -136,6 +146,61 @@ see [Choosing a sizing objective](#choosing-a-sizing-objective) below.
 against a configurable 15–20 % minimum for feed-coupled stability), choked
 fraction of the burn, and validity warnings when the operating point falls
 outside the selected model's range.
+
+**Three chamber models, one equation.** `quasi-steady` solves
+`Pc = ṁ c*/(Cd_n A_t)` as a fixed point — it is the *steady solution* of the
+chamber ODE, is independent of timestep, and is what sizing should use.
+`transient` integrates `dP/P = dṁ_g/m_g − dV/V` in ratio form with
+sub-stepping, which keeps the ignition ramp a property of the chamber rather
+than of the timestep. `transient-hrap` keeps HRAP's own forward-Euler
+discretisation for bit-level comparison against an HRAP run. Since the first is
+the steady limit of the others, they must agree away from ignition and
+tail-off — that agreement is a self-check, not a coincidence.
+
+---
+
+## From sized plate to manufactured plate
+
+The **Plate drawing** tab turns the sized plate into a document a shop can work
+from. Holes are placed on concentric bolt circles with alternate rings staggered
+by half a pitch, which is both how plates are actually drilled and what
+maximises the web between neighbouring holes.
+
+The sheet is A4 landscape at a standard scale (1:1 where the plate fits), with
+a plan view on the inlet face, an edge view, the plate OD dimensioned, a ring
+table (bolt-circle ⌀, hole count, pitch, stagger), a hole coordinate table, a
+title block and manufacturing notes. Three exports:
+
+| Export | Format | For |
+|---|---|---|
+| **Save sheet** | PDF / PNG / SVG | printing and review; PDF prints to scale at 100 % |
+| **Export DXF** | DXF R12, mm, full scale | CAD and CAM — hole circles usable directly as drill targets |
+| **Hole table** | CSV | DRO, CMM or a CAM package that wants a point list |
+
+The DXF puts geometry on named layers — `PLATE_OUTLINE`, `HOLES`,
+`HOLE_CENTRES`, `CENTRELINES`, `SECTION`, `ANNOTATION` — so switching the last
+two off leaves just the plate outline and the holes, ready to extrude.
+
+All three come from the same `PlateLayout` object that draws the on-screen
+sheet, so the drawing and the CAD file cannot disagree about where a hole is;
+the tests assert that hole-for-hole. Scripted use:
+
+```python
+from n2o_injector import layout_from_plate, write_dxf, write_hole_table_csv
+from n2o_injector.plots import save_plate_drawing
+
+layout = layout_from_plate(result.plate, plate_d_mm=85.9)
+save_plate_drawing("plate.pdf", layout)
+write_dxf("plate.dxf", layout)
+write_hole_table_csv("plate.csv", layout)
+```
+
+Two numbers on the sheet decide whether the plate is makeable: **min web**
+(edge-to-edge between the closest two holes — negative means they intersect,
+and the drawing says so in red) and **edge margin**. The notes also quote the
+flow-area sensitivity to hole diameter, because area goes as *d*² — on a
+⌀1.381 hole, +0.02 mm is +2.9 % oxidiser flow, which is the tolerance argument
+to have with the machinist before the plate is cut, not after.
 
 ---
 
@@ -198,8 +263,8 @@ model.
 Three steps, from the **HRAP cross-reference** box in the GUI:
 
 1. **Import HRAP motor config (.mat)** — populates every input field from an
-   HRAP motor configuration, and switches this tool to SPI + transient chamber
-   so it is modelling what HRAP models.
+   HRAP motor configuration, and switches this tool to SPI + `transient-hrap`
+   so it is modelling what HRAP models, with HRAP's own discretisation.
 2. **Load HRAP output (.csv)** — the file HRAP writes from its *Export CSV*
    button.
 3. **Run comparison** — overlays both runs and prints a per-channel error table.
@@ -379,10 +444,12 @@ n2o_injector/
   sizing.py       O/F back-solve, CdA solver, plate realisation
   hrap_io.py      HRAP motor-config + output-CSV import, run comparison
   report.py       design report, HRAP export, JSON/CSV export
-  plots.py        figures (shared by GUI and scripts)
+  drawing.py      plate hole layout, DXF R12 writer, hole-table CSV
+  plots.py        figures and the A4 drawing sheet (shared by GUI and scripts)
   gui.py          Tkinter interface
-tests/            102 validation tests
-examples/         scripted demo + generated outputs
+tests/            140 validation tests
+examples/         scripted demo, the V2.2 trade study, generated outputs
+Trade Study/      V2.2 oxidiser-flow trade study (PDF) + the plate it recommends
 ```
 
 ## Notes on the numerics

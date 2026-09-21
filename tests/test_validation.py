@@ -758,6 +758,158 @@ def test_flow_objectives_reject_impossible_targets(props, table):
                       SizingTarget(objective="mdot_ox", mdot_ox=50.0))
 
 
+def _ignition_time(burn, frac=0.95):
+    """Time to reach ``frac`` of peak chamber pressure."""
+    peak = burn.P_chamber.max()
+    return float(burn.t[int(np.argmax(burn.P_chamber >= frac * peak))])
+
+
+def test_transient_is_timestep_independent(props, table):
+    """The transient chamber must converge under timestep refinement.
+
+    Integrating ``dP/P = dm_g/m_g - dV/V`` additively fails here: at ignition
+    the chamber holds only its seeded air, so the additive step is bounded by
+    the step size and the answer walks with ``dt``. The ratio form does not.
+    """
+    impulses = []
+    for dt in (4e-3, 2e-3, 1e-3, 5e-4):
+        cfg, _ = _demo_config()
+        cfg.chamber_mode = "transient"
+        cfg.initial_Pc = cfg.ambient_P
+        cfg.dt = dt
+        impulses.append(simulate(cfg, props, table).total_impulse)
+    spread = (max(impulses) - min(impulses)) / np.mean(impulses)
+    assert spread < 0.02, f"impulse varies by {spread:.1%} across dt: {impulses}"
+
+
+def test_ignition_ramp_is_set_by_the_chamber_not_the_timestep(props, table):
+    """Halving dt must not halve the ignition ramp.
+
+    This is the specific failure the ratio form fixes: an additive step makes
+    the ramp take a fixed *number* of steps, so its duration tracks ``dt``.
+    """
+    times = []
+    for dt in (1e-3, 5e-4, 2.5e-4):
+        cfg, _ = _demo_config()
+        cfg.chamber_mode = "transient"
+        cfg.initial_Pc = cfg.ambient_P
+        cfg.dt = dt
+        times.append(_ignition_time(simulate(cfg, props, table)))
+    # A dt-driven ramp would halve twice over; a converged one barely moves.
+    assert max(times) - min(times) < 3e-3, f"ignition time tracks dt: {times}"
+
+
+def test_transient_converges_on_the_quasi_steady_plateau(props, table):
+    """Quasi-steady is the steady solution of the transient ODE.
+
+    If the two disagree away from ignition and tail-off, one of them is being
+    integrated badly -- the physics is identical by construction.
+    """
+    cfg_q, _ = _demo_config()
+    cfg_q.dt = 5e-4
+    q = simulate(cfg_q, props, table)
+
+    cfg_t, _ = _demo_config()
+    cfg_t.chamber_mode = "transient"
+    cfg_t.initial_Pc = cfg_t.ambient_P
+    cfg_t.dt = 5e-4
+    tr = simulate(cfg_t, props, table)
+
+    assert tr.total_impulse == pytest.approx(q.total_impulse, rel=0.03)
+    # Compare peak chamber pressure, which the transient must rise to meet.
+    assert tr.P_chamber.max() == pytest.approx(q.P_chamber.max(), rel=0.05)
+
+
+def test_transient_never_exceeds_feed_pressure(props, table):
+    """A chamber cannot out-pressure the tank feeding it.
+
+    With the inflow frozen across a coarse step the chamber could otherwise
+    be filled past tank pressure -- a numerical artefact that looks like a
+    hard start.
+    """
+    for dt in (4e-3, 1e-3):
+        cfg, _ = _demo_config()
+        cfg.chamber_mode = "transient"
+        cfg.initial_Pc = cfg.ambient_P
+        cfg.dt = dt
+        burn = simulate(cfg, props, table)
+        assert burn.P_chamber.max() <= burn.P_tank.max() * 1.001, (
+            f"chamber exceeded feed pressure at dt={dt}"
+        )
+
+
+def test_hrap_chamber_mode_keeps_hrap_discretisation(props, table):
+    """The HRAP-parity mode must stay as it was, dt-dependence included.
+
+    It exists to reproduce an HRAP run, which means reproducing its numerics.
+    """
+    times = []
+    for dt in (2e-3, 1e-3, 5e-4):
+        cfg, _ = _demo_config()
+        cfg.chamber_mode = "transient-hrap"
+        cfg.initial_Pc = cfg.ambient_P
+        cfg.dt = dt
+        times.append(_ignition_time(simulate(cfg, props, table)))
+    # Each halving of dt roughly halves the ramp -- the behaviour being preserved.
+    assert times[0] > times[1] > times[2]
+    assert times[0] / times[2] > 2.0
+
+
+def test_pressure_drop_is_measured_against_the_feed_pressure(props, table):
+    """On a supercharged tank the injector sees the supercharge, not Psat.
+
+    Reporting the drop against saturation pressure understates the stability
+    margin by exactly the supercharge -- which is the one number supercharging
+    was meant to buy.
+    """
+    cfg_sat, _ = _demo_config()
+    sat_P = props.sat(cfg_sat.tank.fill_temp).P
+
+    cfg_sup, _ = _demo_config()
+    cfg_sup.tank.supercharge_P = sat_P + 15e5
+    burn = simulate(cfg_sup, props, table)
+
+    assert burn.P_tank[0] == pytest.approx(sat_P + 15e5, rel=1e-6)
+    assert burn.dP_inj[0] == pytest.approx(burn.P_tank[0] - burn.P_chamber[0], rel=1e-9)
+    # And the supercharge must actually show up as extra margin.
+    base = simulate(cfg_sat, props, table)
+    assert burn.dP_inj[0] > base.dP_inj[0]
+
+
+def test_saturated_tank_is_unaffected_by_the_feed_pressure_fix(props, table):
+    """With no supercharge, feed pressure *is* saturation pressure."""
+    cfg, _ = _demo_config()
+    burn = simulate(cfg, props, table)
+    sat_P = props.sat(cfg.tank.fill_temp).P
+    assert burn.P_tank[0] == pytest.approx(sat_P, rel=1e-9)
+
+
+def test_high_oxidiser_flux_is_flagged_as_extrapolation(props, table):
+    """a*G^n gives an answer at any flux; an extrapolation must be said aloud."""
+    cfg, _ = _demo_config()
+    # A small port at high flow puts G_ox far above the fitted range.
+    cfg.grain.port_id = 0.018
+    res = size_injector(cfg, props, table,
+                        SizingTarget(objective="mdot_ox", mdot_ox=1.5))
+    assert res.burn.G_ox.max() > 700.0
+    assert any("oxidiser flux peaks" in w for w in res.warnings)
+
+
+def test_normal_oxidiser_flux_is_not_flagged(props, table):
+    cfg, _ = _demo_config()
+    res = size_injector(cfg, props, table,
+                        SizingTarget(objective="mdot_ox", mdot_ox=0.5))
+    assert 50.0 < res.burn.G_ox.max() < 700.0
+    assert not any("oxidiser flux peaks" in w for w in res.warnings)
+
+
+def test_unknown_chamber_mode_is_rejected(props):
+    cfg, _ = _demo_config()
+    cfg.chamber_mode = "semi-steady"
+    errs = cfg.validate(props)
+    assert any("chamber mode" in e for e in errs)
+
+
 def test_tail_off_terminates_vapour_phase(props, table):
     """A vapour blowdown must end on physics, not on the time limit.
 

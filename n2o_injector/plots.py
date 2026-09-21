@@ -14,10 +14,11 @@ BAR = 1e5
 def add_startup_inset(ax, b, max_frac=0.25):
     """Overlay a zoomed view of the ignition ramp, if there is one to see.
 
-    With the transient chamber model the chamber fills in ~100-250 ms, which
-    against a multi-second burn is 1-2% of the axis -- it renders as a vertical
-    line at t=0 and looks like the plot simply starts at full pressure. The
-    quasi-steady model has no ramp at all, so nothing is drawn there.
+    With the transient chamber model the chamber fills in a few milliseconds to
+    a few tens of milliseconds, which against a multi-second burn is well under
+    1% of the axis -- it renders as a vertical line at t=0 and looks like the
+    plot simply starts at full pressure. The quasi-steady model has no ramp at
+    all, so nothing is drawn there.
     """
     import numpy as np
 
@@ -205,97 +206,411 @@ def build_comparison_figure(fig, curve, up):
 def ring_layout(n_holes, plate_r, hole_r, edge_margin_frac=0.12):
     """Place ``n_holes`` on concentric rings inside a plate of radius ``plate_r``.
 
-    Real plates are drilled on bolt circles rather than scattered, so holes are
-    distributed over rings with the count per ring proportional to its
-    circumference -- that keeps the spacing between neighbours roughly even,
-    which is what governs whether the webs between holes survive.
-
-    Returns ``(positions, min_gap)`` where ``min_gap`` is the smallest
-    edge-to-edge distance between any two holes, in the same units as the
-    inputs. A negative value means the holes overlap.
+    Thin wrapper over :func:`n2o_injector.drawing.ring_positions`, kept because
+    it is the convenient form for plotting. Returns ``(positions, min_gap)``
+    where ``min_gap`` is the smallest edge-to-edge distance between any two
+    holes, in the same units as the inputs; negative means they overlap.
     """
-    import numpy as np
+    from .drawing import PlateLayout, ring_positions
 
-    if n_holes <= 0 or plate_r <= 0:
+    rings, pos, centre = ring_positions(n_holes, plate_r, hole_r, edge_margin_frac)
+    if not pos:
         return [], float("nan")
-
-    usable = plate_r * (1.0 - edge_margin_frac) - hole_r
-    if usable <= 0:
-        return [(0.0, 0.0)], float("nan")
-
-    if n_holes == 1:
-        return [(0.0, 0.0)], float("inf")
-
-    # Pick a ring count that keeps per-ring crowding reasonable.
-    n_rings = max(1, min(4, int(round((n_holes / 6.0) ** 0.5))))
-    centre = n_holes % n_rings == 1 and n_holes > 6
-
-    outer = n_holes - (1 if centre else 0)
-    radii = [usable * (i + 1) / n_rings for i in range(n_rings)]
-    weights = np.array(radii, dtype=float)
-    counts = np.maximum(1, np.round(outer * weights / weights.sum()).astype(int))
-
-    # Rounding rarely lands exactly on the requested total; fix on the outer ring.
-    counts[-1] += outer - int(counts.sum())
-    if counts[-1] < 1:
-        counts[-1] = 1
-
-    pos = [(0.0, 0.0)] if centre else []
-    for ring_i, (r, c) in enumerate(zip(radii, counts)):
-        c = max(int(c), 1)
-        # Stagger alternate rings by half a step so holes on adjacent circles
-        # interleave rather than lining up radially -- that maximises the web
-        # between neighbours and is how plates are actually drilled.
-        phase = (np.pi / c) if ring_i % 2 else 0.0
-        for k in range(c):
-            a = phase + 2 * np.pi * k / c
-            pos.append((r * np.cos(a), r * np.sin(a)))
-
-    gap = float("inf")
-    for i in range(len(pos)):
-        for j in range(i + 1, len(pos)):
-            d = np.hypot(pos[i][0] - pos[j][0], pos[i][1] - pos[j][1])
-            gap = min(gap, d - 2 * hole_r)
-    return pos, gap
+    lay = PlateLayout(plate_d=2 * plate_r, hole_d=2 * hole_r, thickness=0.0,
+                      holes=pos, rings=rings, centre_hole=centre)
+    return pos, lay.min_web
 
 
-def build_injector_figure(fig, plate, plate_d_mm=None, grain_od_mm=None):
-    """Top-down view of the orifice plate: the plate outline and every hole."""
-    import numpy as np
+# ------------------------------------------------------------------ drawing
+#
+# The plate drawing is laid out as a real A4 sheet: the sheet is the coordinate
+# system (millimetres, origin bottom-left), so a 10 mm title-block row is 10 mm
+# on paper. Line weights and text heights are given in millimetres too and
+# converted to points against the current figure size, which keeps the sheet
+# looking identical whether it is shown in a small GUI tab or exported at 300
+# dpi -- only the overall size changes, never the proportions.
 
+SHEET_W, SHEET_H = 297.0, 210.0  #: A4 landscape, mm
+
+INK = "#12263a"
+LIGHT = "#7d93a8"
+ACCENT = "#8a2b2b"
+HOLE_FILL = "#ffffff"
+
+#: Preferred drawing scales, in the order a drawing office would try them.
+STD_SCALES = (10.0, 5.0, 2.0, 1.0, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01)
+
+
+def _pick_scale(size_mm, room_mm):
+    """Largest standard scale that fits ``size_mm`` into ``room_mm``."""
+    if size_mm <= 0:
+        return 1.0
+    limit = room_mm / size_mm
+    for s in STD_SCALES:
+        if s <= limit:
+            return s
+    return STD_SCALES[-1]
+
+
+def _scale_text(s):
+    if s >= 1:
+        return f"{s:g} : 1"
+    return f"1 : {1 / s:g}"
+
+
+class _Sheet:
+    """Drawing primitives in sheet millimetres."""
+
+    def __init__(self, ax, pt_per_mm):
+        self.ax = ax
+        self.pt = pt_per_mm
+
+    def line(self, x1, y1, x2, y2, lw=0.25, color=INK, ls="-", zorder=2):
+        self.ax.plot([x1, x2], [y1, y2], lw=lw * self.pt, color=color, ls=ls,
+                     solid_capstyle="butt", zorder=zorder)
+
+    def rect(self, x, y, w, h, lw=0.35, color=INK, face="none", ls="-", zorder=2, **kw):
+        from matplotlib.patches import Rectangle
+
+        self.ax.add_patch(Rectangle((x, y), w, h, fill=face != "none", facecolor=face,
+                                    edgecolor=color, linewidth=lw * self.pt, ls=ls,
+                                    zorder=zorder, **kw))
+
+    def circle(self, x, y, r, lw=0.35, color=INK, face="none", ls="-", zorder=2):
+        from matplotlib.patches import Circle
+
+        self.ax.add_patch(Circle((x, y), r, fill=face != "none", facecolor=face,
+                                 edgecolor=color, linewidth=lw * self.pt, ls=ls,
+                                 zorder=zorder))
+
+    def text(self, x, y, s, h=2.5, color=INK, ha="left", va="baseline",
+             weight="normal", family="DejaVu Sans", zorder=5, **kw):
+        self.ax.text(x, y, s, fontsize=h * self.pt, color=color, ha=ha, va=va,
+                     fontweight=weight, family=family, zorder=zorder, **kw)
+
+    def dim(self, x1, y1, x2, y2, label, h=2.4, off=1.2, color=ACCENT):
+        """A dimension line with arrowheads at both ends and a centred label."""
+        self.ax.annotate("", xy=(x1, y1), xytext=(x2, y2),
+                         arrowprops=dict(arrowstyle="<|-|>", color=color,
+                                         lw=0.25 * self.pt, shrinkA=0, shrinkB=0,
+                                         mutation_scale=2.2 * self.pt))
+        self.text((x1 + x2) / 2, (y1 + y2) / 2 + off, label, h=h, color=color,
+                  ha="center", va="bottom")
+
+
+def _sheet_axes(fig):
+    """Clear ``fig`` and return ``(_Sheet, points-per-sheet-mm)``.
+
+    The axes is centred and given the sheet's own aspect ratio, so a wide GUI
+    tab shows the sheet with margins either side rather than a stretched one.
+    """
     fig.clear()
-    ax = fig.subplots()
+    try:
+        fig.set_layout_engine("none")
+    except Exception:  # older matplotlib
+        pass
+    fig.patch.set_facecolor("white")
 
-    hole_d = plate.hole_d * 1e3
-    if plate_d_mm is None or plate_d_mm <= 0:
-        plate_d_mm = grain_od_mm if grain_od_mm else max(hole_d * 12, 40.0)
-    R = plate_d_mm / 2.0
+    w_in, h_in = fig.get_size_inches()
+    fig_ar = (w_in / h_in) if h_in else 1.0
+    sheet_ar = SHEET_W / SHEET_H
+    if fig_ar > sheet_ar:
+        aw, ah = sheet_ar / fig_ar, 1.0
+    else:
+        aw, ah = 1.0, fig_ar / sheet_ar
 
-    pos, gap = ring_layout(plate.n_holes, R, hole_d / 2.0)
+    ax = fig.add_axes([(1 - aw) / 2, (1 - ah) / 2, aw, ah])
+    ax.set_xlim(0, SHEET_W)
+    ax.set_ylim(0, SHEET_H)
+    ax.set_aspect("equal", adjustable="box")
+    ax.axis("off")
+    ax.set_facecolor("white")
+    return _Sheet(ax, w_in * aw * 72.0 / SHEET_W)
 
-    ax.add_patch(plt_circle(0, 0, R, face="#e9edf2", edge="#33465e", lw=2.0))
-    ax.add_patch(plt_circle(0, 0, R * 0.88, face="none", edge="#9bb0c6", lw=0.8, ls=":"))
-    for (x, y) in pos:
-        ax.add_patch(plt_circle(x, y, hole_d / 2.0, face="#123048", edge="#0b1f2f", lw=0.6))
 
-    ax.set_aspect("equal")
-    lim = R * 1.12
-    ax.set_xlim(-lim, lim)
-    ax.set_ylim(-lim, lim)
-    ax.set_xlabel("mm")
-    ax.set_ylabel("mm")
-    ax.grid(alpha=0.25)
+def build_plate_drawing(fig, layout, meta=None, version=""):
+    """Render the orifice plate as a dimensioned A4 manufacturing drawing.
 
-    gap_txt = "n/a" if not np.isfinite(gap) else f"{gap:.2f} mm"
-    warn = "  <-- HOLES OVERLAP" if (np.isfinite(gap) and gap < 0) else ""
-    ax.set_title(
-        f"Injector plate: {plate.n_holes} x {hole_d:.3f} mm  "
-        f"(plate {plate_d_mm:.1f} mm, Cd {plate.Cd:.2f}, L/D {plate.L_over_D:.2f})\n"
-        f"total area {plate.total_area * 1e6:.2f} mm²   "
-        f"min web between holes {gap_txt}{warn}",
-        fontsize=10,
-    )
-    return ax
+    ``layout`` is a :class:`n2o_injector.drawing.PlateLayout`; the same object
+    is what :func:`n2o_injector.drawing.write_dxf` exports, so the sheet and
+    the CAD file always describe the same plate.
+    """
+    from .drawing import DrawingMeta, hole_table
+
+    m = (meta or DrawingMeta()).stamped()
+    s = _sheet_axes(fig)
+
+    # ---- sheet frame and zones ----------------------------------------
+    M = 10.0                      # sheet margin
+    s.rect(M, M, SHEET_W - 2 * M, SHEET_H - 2 * M, lw=0.7)
+    blocks_top = 52.0             # title block / notes block share this strip
+    tb_x = 180.0                  # title block left edge
+    table_x = 178.0               # hole table left edge
+
+    band_h = min(34.0, max(18.0, layout.thickness * 0.9 + 14.0))
+    plan_y0 = blocks_top + band_h
+    plan_cx = (M + table_x) / 2.0
+    plan_cy = (plan_y0 + (SHEET_H - M)) / 2.0
+
+    room = min((table_x - M) * 0.46, ((SHEET_H - M) - plan_y0) * 0.44) * 2.0
+    scale = _pick_scale(layout.plate_d, room)
+    R = 0.5 * layout.plate_d * scale
+    hr = 0.5 * layout.hole_d * scale
+
+    # ---- plan view ------------------------------------------------------
+    s.circle(plan_cx, plan_cy, R, lw=0.6, face="#f4f7fa")
+    # Long-dash-short-dash is the drawing convention for a centreline.
+    cl = (0, (9, 2.5, 1.5, 2.5))
+    s.line(plan_cx - R * 1.12, plan_cy, plan_cx + R * 1.12, plan_cy,
+           lw=0.2, color=LIGHT, ls=cl)
+    s.line(plan_cx, plan_cy - R * 1.12, plan_cx, plan_cy + R * 1.12,
+           lw=0.2, color=LIGHT, ls=cl)
+    for ring in layout.rings:
+        s.circle(plan_cx, plan_cy, ring.radius * scale, lw=0.2, color=LIGHT, ls=cl)
+
+    for (x, y) in layout.holes:
+        px, py = plan_cx + x * scale, plan_cy + y * scale
+        s.circle(px, py, hr, lw=0.35, face=HOLE_FILL, zorder=3)
+        if hr > 0.9:  # centre marks only when they would be legible
+            s.line(px - hr * 1.5, py, px + hr * 1.5, py, lw=0.15, color=LIGHT, zorder=4)
+            s.line(px, py - hr * 1.5, px, py + hr * 1.5, lw=0.15, color=LIGHT, zorder=4)
+
+    # Outside diameter, dimensioned below the view.
+    dy = plan_cy - R - 8.0
+    for sx in (-R, R):
+        s.line(plan_cx + sx, plan_cy, plan_cx + sx, dy - 2.0, lw=0.15, color=ACCENT)
+    s.dim(plan_cx - R, dy, plan_cx + R, dy, f"⌀{layout.plate_d:.2f}")
+
+    # Hole callout, led out to the free corner above the view.
+    if layout.holes:
+        hx, hy = max(layout.holes, key=lambda p: (p[1], p[0]))
+        px, py = plan_cx + hx * scale, plan_cy + hy * scale
+        lx, ly = table_x - 6.0, SHEET_H - M - 8.0
+        s.line(px, py, lx - 34.0, ly - 1.0, lw=0.2, color=ACCENT)
+        s.line(lx - 34.0, ly - 1.0, lx, ly - 1.0, lw=0.2, color=ACCENT)
+        s.text(lx, ly, f"{layout.n_holes}× ⌀{layout.hole_d:.3f} THRU",
+               h=2.8, color=ACCENT, ha="right", weight="bold")
+        s.text(lx, ly - 4.0, f"L/D {layout.L_over_D:.2f}   "
+                             f"AREA {layout.total_area:.2f} mm²",
+               h=2.2, color=ACCENT, ha="right")
+
+    # Ring data table, top-left of the view area.
+    if layout.rings:
+        rx, ry = M + 3.0, SHEET_H - M - 5.0
+        s.text(rx, ry, "RING DATA", h=2.4, weight="bold")
+        cols = [(0, "RING"), (11, "B.C. ⌀"), (28, "HOLES"), (40, "PITCH"),
+                (54, "STAGGER")]
+        for dx, name in cols:
+            s.text(rx + dx, ry - 4.0, name, h=2.0, color=LIGHT)
+        s.line(rx, ry - 5.2, rx + 68.0, ry - 5.2, lw=0.15, color=LIGHT)
+        row = ry - 8.4
+        if layout.centre_hole:
+            s.text(rx, row, "C", h=2.0)
+            s.text(rx + 11, row, "on centre", h=2.0)
+            s.text(rx + 28, row, "1", h=2.0)
+            row -= 3.4
+        for i, ring in enumerate(layout.rings, start=1):
+            s.text(rx, row, str(i), h=2.0)
+            s.text(rx + 11, row, f"{ring.bolt_circle_d:.2f}", h=2.0)
+            s.text(rx + 28, row, str(ring.count), h=2.0)
+            s.text(rx + 40, row, f"{ring.pitch_deg:.2f}°", h=2.0)
+            s.text(rx + 54, row, f"{ring.phase_deg:.2f}°", h=2.0)
+            row -= 3.4
+
+    s.text(plan_cx, plan_y0 + 2.0, "VIEW ON INLET (UPSTREAM) FACE",
+           h=2.2, color=LIGHT, ha="center")
+
+    # ---- edge view ------------------------------------------------------
+    sec_cy = blocks_top + band_h * 0.55
+    t = max(layout.thickness * scale, 0.6)
+    # Hatching takes its colour from the patch edge, so the hatch and the
+    # outline are drawn as two patches -- light section fill, crisp outline.
+    s.rect(plan_cx - R, sec_cy - t / 2, 2 * R, t, lw=0.0, color="#c3d0dc",
+           face="#eef3f8", hatch="///", zorder=1)
+    s.rect(plan_cx - R, sec_cy - t / 2, 2 * R, t, lw=0.5, zorder=3)
+    # Projected hole walls stop being informative once they merge into a comb.
+    crowded = len(layout.holes) > 48
+    if not crowded:
+        for (x, _y) in layout.holes:
+            px = plan_cx + x * scale
+            s.line(px - hr, sec_cy - t / 2, px - hr, sec_cy + t / 2, lw=0.25, zorder=4)
+            s.line(px + hr, sec_cy - t / 2, px + hr, sec_cy + t / 2, lw=0.25, zorder=4)
+    s.line(plan_cx + R + 3, sec_cy - t / 2, plan_cx + R + 3, sec_cy + t / 2,
+           lw=0.15, color=ACCENT)
+    s.text(plan_cx + R + 5, sec_cy - 1.0, f"{layout.thickness:.2f} THK",
+           h=2.2, color=ACCENT)
+    s.text(plan_cx - R, sec_cy + t / 2 + 2.5,
+           "EDGE VIEW — HOLES OMITTED FOR CLARITY, ALL THRU" if crowded
+           else "EDGE VIEW — HOLES PROJECTED, ALL THRU", h=2.2, color=LIGHT)
+
+    # ---- hole coordinate table ------------------------------------------
+    s.line(table_x, M, table_x, SHEET_H - M, lw=0.5)
+    ty = SHEET_H - M - 5.0
+    s.text(table_x + 3, ty, "HOLE TABLE", h=2.6, weight="bold")
+    s.text(table_x + 3, ty - 4.0, "mm from plate centre, X right / Y up",
+           h=1.9, color=LIGHT)
+    cols = [(3, "NO", "left"), (13, "RING", "left"), (42, "X", "right"),
+            (64, "Y", "right"), (84, "R", "right"), (104, "ANG", "right")]
+    for dx, name, ha in cols:
+        s.text(table_x + dx, ty - 8.5, name, h=2.0, color=LIGHT, ha=ha)
+    s.line(table_x + 3, ty - 10.0, SHEET_W - M - 3, ty - 10.0, lw=0.15, color=LIGHT)
+
+    rows = hole_table(layout)
+    pitch = 3.3
+    # The column stops at the title block, not at the sheet margin.
+    room_rows = int((ty - 13.0 - (blocks_top + 4.0)) / pitch)
+    shown = rows[: max(room_rows - (1 if len(rows) > room_rows else 0), 0)]
+    y = ty - 13.5
+    for r in shown:
+        s.text(table_x + 3, y, f"{r['hole']}", h=2.0)
+        s.text(table_x + 13, y, f"{r['ring'] or 'C'}", h=2.0)
+        s.text(table_x + 42, y, f"{r['x_mm']:+.3f}", h=2.0, ha="right",
+               family="DejaVu Sans Mono")
+        s.text(table_x + 64, y, f"{r['y_mm']:+.3f}", h=2.0, ha="right",
+               family="DejaVu Sans Mono")
+        s.text(table_x + 84, y, f"{r['radius_mm']:.3f}", h=2.0, ha="right",
+               family="DejaVu Sans Mono")
+        s.text(table_x + 104, y, f"{r['angle_deg']:.2f}°", h=2.0, ha="right",
+               family="DejaVu Sans Mono")
+        y -= pitch
+    if len(shown) < len(rows):
+        s.text(table_x + 3, y, f"... {len(rows) - len(shown)} more — "
+                               f"export the hole table CSV", h=2.0, color=ACCENT)
+    elif y - (blocks_top + 4.0) > 34.0:
+        # Spare room under a short table: spend it on the numbers a reviewer
+        # asks for next, rather than leaving the column half empty.
+        y -= 6.0
+        s.line(table_x + 3, y + 3.0, SHEET_W - M - 3, y + 3.0, lw=0.15, color=LIGHT)
+        s.text(table_x + 3, y - 2.0, "DESIGN DATA", h=2.4, weight="bold")
+        data = [
+            ("TOTAL FLOW AREA", f"{layout.total_area:.3f} mm²"),
+            ("EFFECTIVE Cd·A", f"{layout.Cd * layout.total_area:.3f} mm²"),
+            ("HOLE L/D", f"{layout.L_over_D:.2f}"),
+            ("MIN WEB / EDGE", f"{layout.min_web:.2f} / {layout.edge_margin:.2f}"),
+            ("AREA PER +0.02 ⌀", f"{layout.area_sensitivity(0.02):+.2f} %"),
+        ]
+        dy2 = y - 6.5
+        for label, value in data:
+            s.text(table_x + 3, dy2, label, h=2.0, color=LIGHT)
+            s.text(table_x + 46, dy2, value, h=2.0)
+            dy2 -= 3.6
+
+    # ---- notes -----------------------------------------------------------
+    s.line(M, blocks_top, SHEET_W - M, blocks_top, lw=0.5)
+    s.line(tb_x, M, tb_x, blocks_top, lw=0.5)
+    s.text(M + 3, blocks_top - 5.0, "NOTES", h=2.4, weight="bold")
+
+    # Wrap first, then choose the line pitch that fits what wrapping produced,
+    # so a long note shrinks the block rather than running off the sheet.
+    import textwrap
+
+    wrapped = []
+    for i, note in enumerate(_plate_notes(layout, m), start=1):
+        bad = note.startswith("!")
+        for k, part in enumerate(textwrap.wrap(note.lstrip("! "), 112)):
+            wrapped.append((f"{i}." if k == 0 else "", part, bad))
+    # The bottom strip of the block is reserved for the print-scale check bar.
+    avail = blocks_top - 9.5 - (M + 8.5)
+    pitch = min(3.4, avail / max(len(wrapped), 1))
+    nh = min(2.0, pitch * 0.62)
+    ny = blocks_top - 9.5
+    for num, part, bad in wrapped:
+        colour = ACCENT if bad else INK
+        if num:
+            s.text(M + 3, ny, num, h=nh, color=colour)
+        s.text(M + 8, ny, part, h=nh, color=colour,
+               weight="bold" if bad else "normal")
+        ny -= pitch
+
+    # Print-scale check bar: a printed sheet is only to scale if it was printed
+    # at 100%, and a bar of known *paper* length is how the shop confirms that
+    # before measuring anything off the drawing.
+    bar, by = 50.0, M + 4.0
+    bx = tb_x - 6.0 - bar
+    s.line(bx, by, bx + bar, by, lw=0.5)
+    for k in (0, 1):
+        s.line(bx + k * bar, by - 1.3, bx + k * bar, by + 1.3, lw=0.5)
+    s.text(bx - 3.0, by - 0.7, "CHECK BAR — 50 mm ON PAPER:", h=1.9,
+           color=LIGHT, ha="right")
+
+    # ---- title block -----------------------------------------------------
+    dash = "—"
+    s.text(tb_x + 3, blocks_top - 6.0, m.title, h=3.4, weight="bold")
+    rows_tb = [
+        ("PROJECT", m.project or dash),
+        ("PART NO", m.part_no or dash),
+        ("MATERIAL", m.material or dash),
+        ("PLATE", f"⌀{layout.plate_d:.2f} × {layout.thickness:.2f} THK"),
+        ("HOLES", f"{layout.n_holes} × ⌀{layout.hole_d:.3f} THRU"),
+        ("SCALE", f"{_scale_text(scale)}   UNITS mm"),
+        ("DRAWN", f"{m.drawn_by or dash}    {m.date}"),
+    ]
+    ry = blocks_top - 11.0
+    for label, value in rows_tb:
+        s.text(tb_x + 3, ry, label, h=1.9, color=LIGHT)
+        s.text(tb_x + 24, ry, value, h=2.2)
+        ry -= 4.3
+    src = "n2o-injector-sizing" + (f" v{version}" if version else "")
+    if m.flow_model:
+        src += f" — {m.flow_model} model, Cd {layout.Cd:.3f}"
+    s.text(tb_x + 3, M + 2.5, src, h=1.8, color=LIGHT)
+    return s.ax
+
+
+def _plate_notes(layout, meta):
+    """The notes block. Lines beginning ``!`` are rendered as warnings."""
+    tol = 0.02
+    notes = [
+        "ALL DIMENSIONS IN MILLIMETRES. ORIGIN AT PLATE CENTRE. "
+        "PLAN VIEW IS FROM THE INLET (UPSTREAM) FACE.",
+        f"{layout.n_holes} HOLES ⌀{layout.hole_d:.3f} THRU, EQUALLY SPACED ON THE "
+        "BOLT CIRCLES LISTED IN RING DATA.",
+        f"FLOW AREA GOES AS d²: A HOLE ⌀ ERROR OF +{tol:.2f} GIVES "
+        f"{layout.area_sensitivity(tol):+.1f}% AREA, AND THE SAME SHIFT IN "
+        "OXIDISER FLOW. SET THE TOLERANCE TO SUIT.",
+        f"Cd {layout.Cd:.3f} ASSUMED FOR SHARP-EDGED DRILLED HOLES. DEBURR THE OUTLET "
+        "FACE. DO NOT CHAMFER OR RADIUS THE INLET WITHOUT RE-SIZING — INLET "
+        "GEOMETRY CHANGES Cd.",
+        f"L/D {layout.L_over_D:.2f} FROM {layout.thickness:.2f} THICKNESS. THE FLOW "
+        "MODEL ASSUMES THIS LENGTH; CHANGING THICKNESS CHANGES PREDICTED FLOW.",
+    ]
+    if meta.tolerance:
+        notes.append(meta.tolerance)
+    web, edge = layout.min_web, layout.edge_margin
+    if web < 0:
+        notes.append(f"! HOLES OVERLAP BY {abs(web):.2f} — NOT MANUFACTURABLE AS "
+                     "DRAWN. REDUCE HOLE COUNT OR INCREASE PLATE DIAMETER.")
+    elif web < 2 * layout.hole_d:
+        notes.append(f"! MIN WEB BETWEEN HOLES {web:.2f} IS THIN NEXT TO "
+                     f"⌀{layout.hole_d:.3f} — BACK THE PLATE AND PECK DRILL.")
+    else:
+        notes.append(f"MIN WEB BETWEEN HOLES {web:.2f}. EDGE MARGIN {edge:.2f}.")
+    notes.append("PRINT AT 100% ON A4 LANDSCAPE FOR TRUE SCALE — CONFIRM WITH THE "
+                 "CHECK BAR BEFORE MEASURING OFF THIS SHEET.")
+    notes.extend(meta.notes)
+    return notes
+
+
+def build_injector_figure(fig, plate, plate_d_mm=None, grain_od_mm=None,
+                          meta=None, version=""):
+    """Draw the sized plate as a manufacturing sheet; returns the layout."""
+    from .drawing import layout_from_plate
+
+    layout = layout_from_plate(plate, plate_d_mm=plate_d_mm, grain_od_mm=grain_od_mm)
+    build_plate_drawing(fig, layout, meta=meta, version=version)
+    return layout
+
+
+def save_plate_drawing(path, layout, meta=None, version="", dpi=300):
+    """Write the drawing sheet to PNG / PDF / SVG at true A4-landscape size."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    fig = Figure(figsize=(SHEET_W / 25.4, SHEET_H / 25.4))
+    FigureCanvasAgg(fig)
+    build_plate_drawing(fig, layout, meta=meta, version=version)
+    fig.savefig(path, dpi=dpi, facecolor="white")
+    return path
 
 
 def plt_circle(x, y, r, face="none", edge="k", lw=1.0, ls="-"):

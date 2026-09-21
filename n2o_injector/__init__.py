@@ -22,6 +22,20 @@ from .injector import (
     required_CdA,
     spi_mass_flux,
 )
+from .drawing import (
+    DrawingMeta,
+    PlateLayout,
+    Ring,
+    default_meta,
+    export_all,
+    hole_table,
+    layout_from_plate,
+    plate_layout,
+    ring_positions,
+    suggested_filename,
+    write_dxf,
+    write_hole_table_csv,
+)
 from .hrap_io import (
     HrapRun,
     ImportedMotor,
@@ -65,6 +79,9 @@ __all__ = [
     "FlowModel", "FluxResult", "OrificeCurve", "SaturationTable", "check_validity",
     "dyer_kappa", "hem_mass_flux", "ld_hem_weight", "mass_flow", "mass_flux",
     "recommend_model", "required_CdA", "spi_mass_flux",
+    "DrawingMeta", "PlateLayout", "Ring", "default_meta", "export_all", "hole_table",
+    "layout_from_plate", "plate_layout", "ring_positions", "suggested_filename",
+    "write_dxf", "write_hole_table_csv",
     "BurnResult", "Grain", "InjectorSpec", "MotorConfig", "Nozzle", "Tank",
     "fuel_flow", "required_mdot_ox", "simulate",
     "HrapRun", "ImportedMotor", "RunComparison", "compare_to_hrap",
