@@ -1,0 +1,63 @@
+{
+  "schema": "n2o-injector-config/1",
+  "saved": "2026-09-20T16:16:59",
+  "notes": "V2.1 AS-BUILT, set up to reproduce the HRAP run for cross-checking: 1-port grain, injector CdA 3.85e-5 back-solved from the HRAP CSV, SPI (HRAP is SPI-only), constant-O/F 8.27 (HRAP was run in that mode), transient chamber, vapour tail on. Use Simulate geometry as-built, then Run comparison. Do NOT compare a V2.2 design config against this HRAP CSV - they are different motors.",
+  "tank": {
+    "volume_L": 7.0,
+    "fill_temp_C": 23.850000000000023,
+    "ox_mass_kg": 4.4803,
+    "supercharge_bar": null
+  },
+  "grain": {
+    "length_mm": 177.79999999999998,
+    "port_id_mm": 25.4,
+    "outer_d_mm": 85.852,
+    "n_ports": 1
+  },
+  "nozzle": {
+    "throat_d_mm": 30.479999999999997,
+    "expansion_ratio": 4.34028,
+    "Cd": 0.95,
+    "efficiency": 0.9
+  },
+  "injector": {
+    "n_holes": 24,
+    "hole_d_mm": 1.7077250545648834,
+    "Cd": 0.7,
+    "plate_thickness_mm": 12.7,
+    "min_hole_d_mm": 0.8,
+    "model": "SPI",
+    "ld_ref": 5.0
+  },
+  "propellant": {
+    "name": "Paraffin",
+    "reg_a": 0.0304,
+    "reg_n": 0.681,
+    "reg_m": 0.0,
+    "rho_fuel": 900.0,
+    "opt_OF": 8.27,
+    "cstar_const": 1550.0,
+    "cstar_eff": 1.0,
+    "cea_table_file": "C:\\Users\\andre\\OneDrive\\Desktop\\claude\\n2o-injector-sizing\\configs\\Paraffin.mat"
+  },
+  "run": {
+    "ambient_bar": 1.01325,
+    "dt_ms": 1.0,
+    "max_time_s": 40.0,
+    "chamber_mode": "transient",
+    "chamber_volume_L": 0.0,
+    "regression_mode": "constant_OF",
+    "const_OF": 8.27,
+    "initial_Pc_bar": 1.01325,
+    "stop_at_liquid_exhausted": false,
+    "tail_cutoff_frac": 1.05
+  },
+  "target": {
+    "objective": "burn_average",
+    "OF": 8.27,
+    "mdot_ox": 1.0,
+    "chamber_P_bar": 30.0,
+    "min_dP_fraction": 0.2,
+    "design_time": 0.0
+  }
+}

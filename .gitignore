@@ -1,0 +1,38 @@
+# --- PyInstaller output ------------------------------------------------
+# These are large and fully rebuildable from tools/n2o_injector.spec.
+# dist/ is ~600 MB and the one-file exe alone is 156 MB, which exceeds
+# GitHub's 100 MB per-file hard limit -- committing it would break the push.
+build/
+dist/
+*.spec.bak
+
+# --- generated documents -----------------------------------------------
+# Rebuild with: python tools/build_docx.py
+USER_GUIDE.docx
+USER_GUIDE.pdf
+VALIDATION.docx
+VALIDATION.pdf
+
+# --- generated run artefacts -------------------------------------------
+examples/output/
+startup_error.log
+self_test.log
+*.eng
+*.rse
+
+# --- python ------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# --- editors / OS ------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+.DS_Store

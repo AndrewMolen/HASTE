@@ -1,0 +1,14 @@
+# Runtime dependencies for the GUI and the sizing engine.
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+
+# Optional: second N2O property backend (reference EOS, matches HRAP's
+# Python build). The tool falls back to the built-in ESDU curve fits without it.
+# CoolProp>=6.4
+
+# Development / tooling only -- not needed to run the app:
+#   pytest        run the test suite
+#   pyinstaller   build the standalone executable (tools/n2o_injector.spec)
+#   python-docx   build the Word guides (tools/build_docx.py)
+#   pillow        regenerate the app icon (tools/make_icon.py)

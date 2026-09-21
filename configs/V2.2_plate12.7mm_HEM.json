@@ -1,0 +1,63 @@
+{
+  "schema": "n2o-injector-config/1",
+  "saved": "2026-09-20T15:44:38",
+  "notes": "V2.2 - 5-port 0.70in grain, 12.7 mm plate sized with HEM. L/D ~9 sits in the regime covered by the Waxman/NASA cold-flow validation. Regression a/n are HRAP defaults, NOT measured.",
+  "tank": {
+    "volume_L": 7.0,
+    "fill_temp_C": 23.850000000000023,
+    "ox_mass_kg": 4.4803,
+    "supercharge_bar": null
+  },
+  "grain": {
+    "length_mm": 177.79999999999998,
+    "port_id_mm": 17.779999999999998,
+    "outer_d_mm": 85.852,
+    "n_ports": 5
+  },
+  "nozzle": {
+    "throat_d_mm": 30.479999999999997,
+    "expansion_ratio": 4.34028,
+    "Cd": 0.95,
+    "efficiency": 0.9
+  },
+  "injector": {
+    "n_holes": 20,
+    "hole_d_mm": 1.3809085327143804,
+    "Cd": 0.7,
+    "plate_thickness_mm": 12.7,
+    "min_hole_d_mm": 0.8,
+    "model": "HEM",
+    "ld_ref": 5.0
+  },
+  "propellant": {
+    "name": "Paraffin",
+    "reg_a": 0.0304,
+    "reg_n": 0.681,
+    "reg_m": 0.0,
+    "rho_fuel": 900.0,
+    "opt_OF": 8.27,
+    "cstar_const": 1550.0,
+    "cstar_eff": 1.0,
+    "cea_table_file": "C:\\Users\\andre\\OneDrive\\Desktop\\claude\\n2o-injector-sizing\\configs\\Paraffin.mat"
+  },
+  "run": {
+    "ambient_bar": 1.01325,
+    "dt_ms": 2.0,
+    "max_time_s": 40.0,
+    "chamber_mode": "transient",
+    "chamber_volume_L": 0.0,
+    "regression_mode": "shifting",
+    "const_OF": 8.0,
+    "initial_Pc_bar": 1.01325,
+    "stop_at_liquid_exhausted": false,
+    "tail_cutoff_frac": 1.05
+  },
+  "target": {
+    "objective": "burn_average",
+    "OF": 7.5,
+    "mdot_ox": 1.0,
+    "chamber_P_bar": 30.0,
+    "min_dP_fraction": 0.2,
+    "design_time": 0.0
+  }
+}
