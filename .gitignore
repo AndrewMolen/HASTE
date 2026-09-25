@@ -8,9 +8,12 @@ dist/
 
 # --- generated documents -----------------------------------------------
 # Rebuild with: python tools/build_docx.py
-USER_GUIDE.docx
+#
+# The .docx are tracked deliberately despite being generated: the README links
+# to them directly, so ignoring them leaves two dead links on the repository
+# front page for anyone who does not clone and run the build. They are ~50 KB
+# each. The PDFs are 10x that and nothing links to them, so they stay out.
 USER_GUIDE.pdf
-VALIDATION.docx
 VALIDATION.pdf
 
 # Raster previews of drawings that are already tracked as vector PDFs --

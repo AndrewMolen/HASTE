@@ -10,7 +10,7 @@ tracking an O/F target across the **whole burn** including tank blowdown.
 Built to interoperate with [HRAP](https://github.com/rnickel1/HRAP_Source)
 (Hybrid Rocket Analysis Program).
 
-![burn summary](examples/output/burn_summary.png)
+![burn summary](assets/burn_summary.png)
 
 ---
 
@@ -53,7 +53,7 @@ Takes ~2.5 minutes and produces two flavours in `dist/`:
 
 | Build | Size | Launch | Use when |
 |---|---:|---:|---|
-| `dist/N2O Injector Sizing Tool/` (folder) | 445 MB | **~5 s** | day-to-day use *(recommended)* |
+| `dist/N2O Injector Sizing Tool/` (folder) | 449 MB | **~5 s** | day-to-day use *(recommended)* |
 | `dist/N2O Injector Sizing Tool.exe` (single file) | 156 MB | ~12 s | handing to someone else |
 
 The one-file build is smaller and portable, but unpacks the whole bundle to a
@@ -128,8 +128,9 @@ python tools/build_docx.py
 | **Dyer (L/D weighted)** | heuristic blend driven by L/D | regime exploration only, clearly flagged in the code |
 
 For a **saturated (self-pressurising) feed**, `P₁ = P_sat` so `κ = 1` exactly
-and Dyer is the 50/50 average of SPI and HEM — visible as the flat purple line
-in `examples/output/model_comparison.png`.
+and Dyer is the 50/50 average of SPI and HEM — the flat purple line below.
+
+![injector model comparison](assets/model_comparison.png)
 
 **Sizing across the burn.** A drilled plate has one fixed area, but the
 operating point moves continuously as the tank blows down and the port opens.
@@ -148,6 +149,13 @@ see [Choosing a sizing objective](#choosing-a-sizing-objective) below.
 against a configurable 15–20 % minimum for feed-coupled stability), choked
 fraction of the burn, and validity warnings when the operating point falls
 outside the selected model's range.
+
+**Extrapolation is called out, not absorbed.** `a·G_ox^n` returns a number at
+any flux, and a wrong one looks exactly like a right one, so the oxidiser flux
+is checked against the range paraffin regression correlations are normally
+fitted over (~50–700 kg/m²/s) and flagged when the burn runs outside it. The
+warning says what to do about it, which is never a different injector: `G_ox`
+is set by the grain port area.
 
 **Three chamber models, one equation.** `quasi-steady` solves
 `Pc = ṁ c*/(Cd_n A_t)` as a fixed point — it is the *steady solution* of the
@@ -201,16 +209,18 @@ Two numbers on the sheet decide whether the plate is makeable: **min web**
 (edge-to-edge between the closest two holes — negative means they intersect,
 and the drawing says so in red) and **edge margin**. The notes also quote the
 flow-area sensitivity to hole diameter, because area goes as *d*² — on a
-⌀1.381 hole, +0.02 mm is +2.9 % oxidiser flow, which is the tolerance argument
-to have with the machinist before the plate is cut, not after.
+⌀1.20 hole, +0.02 mm is +3.4 % flow area, and since the injector is the
+flow-metering element, the same shift in oxidiser flow. That is the tolerance
+argument to have with the machinist before the plate is cut, not after.
 
 ---
 
 ## HRAP compatibility
 
-Your brief asked what HRAP does internally and whether this tool should feed it
-or cross-validate it. I read HRAP's source and theory document directly rather
-than assuming. The findings:
+HRAP is the reference most amateur N2O hybrid work is checked against, so what
+it does internally decides whether this tool should feed it, cross-validate it,
+or both. The following comes from reading HRAP's source and theory document
+directly rather than inferring it from behaviour:
 
 **HRAP's liquid injector model is SPI, and only SPI.** From its theory
 document (eqs. 1–2) it defines `dLoss = K/(NA)²` with `K = 1/Cd²`, then
@@ -252,11 +262,10 @@ the sized `inj_D`, `inj_N` and `inj_Cd`. Field names, struct layout and unit
 strings were taken from HRAP's own shipped `motor_configs/*.mat` and the unit
 drop-downs inside `HRAP.mlapp`, so only values HRAP accepts are emitted.
 
-So the answer to your question is **both**: the tool produces an injector
-definition HRAP can import, *and* it independently reproduces HRAP's O/F-vs-time
-prediction when run in SPI mode — which is the cross-validation path, since any
-difference then isolates to the O/F and blowdown logic rather than the injector
-model.
+So it does **both**: the tool produces an injector definition HRAP can import,
+*and* it independently reproduces HRAP's O/F-vs-time prediction when run in SPI
+mode — which is the cross-validation path, since any difference then isolates to
+the O/F and blowdown logic rather than to the injector model.
 
 ---
 
@@ -318,39 +327,39 @@ drop as `P_tank − P_chamber` from the two pressure columns, and flags it.
 
 ---
 
-## Answers to the open items in your brief
+## Defaults, and what to check before trusting them
 
-**1. Reference documents.** I did not need them for the physics: HRAP's own
-theory PDF ships in the repository and supplied the injector, blowdown and
-combustion formulations, and it cites ESDU 91022 for N2O properties, which I
-implemented from the coefficients in HRAP's `NOX.m`.
+**Where the physics comes from.** The injector, blowdown and combustion
+formulations follow HRAP's theory document, which ships in its repository at
+`HRAP - Matlab/sources/Theory and Application of the Hybrid Rocket Analysis
+Program (HRAP).pdf`. That document cites ESDU 91022 for N2O properties; the
+correlations here are implemented from the coefficients in HRAP's `NOX.m`.
 
-**2. HRAP link.** Found and used: `github.com/rnickel1/HRAP_Source`. The theory
-document is `HRAP - Matlab/sources/Theory and Application of the Hybrid Rocket
-Analysis Program (HRAP).pdf`.
+**O/F target.** A constant target is the default. A time-varying profile is
+entered as `time, O/F` pairs and selected with the `least_squares` objective.
 
-**3. Fixed vs. profile O/F target.** Both are supported, so this did not need
-to block. A constant target is the default; a time-varying profile is entered
-as `time, O/F` pairs and selected with the `least_squares` objective.
-
-**4. Paraffin regression coefficients.** Defaulted to HRAP's own shipped
+**Paraffin regression coefficients** default to HRAP's own shipped
 `Paraffin.mat` values — **a = 0.0304, n = 0.681, m = 0**, ρ = 900 kg/m³,
-optimum O/F 8.27 — and left fully editable.
+optimum O/F 8.27 — and are fully editable.
 
-> ⚠️ **Worth checking before you trust a design.** HRAP's paraffin `a = 0.0304`
-> gives ~1.1 mm/s at G = 200 kg/m²/s, which is on the low side compared with
-> commonly cited paraffin data (paraffin is usually quoted as regressing
-> roughly 3× faster than HTPB, and HRAP's own HTPB entry is a = 0.198,
-> n = 0.325). A low `a` forces a high oxidiser flow to reach a given O/F, which
-> is why the demo case shows `G_ox` starting around 1350 kg/m²/s. **Substitute
-> your own static-fire-derived a and n if you have them** — this single input
-> moves the sized orifice area more than the choice of flow model does.
+> ⚠️ **This is the weakest input in the whole tool.** HRAP's paraffin
+> `a = 0.0304` gives ~1.1 mm/s at G = 200 kg/m²/s, which is low against commonly
+> cited paraffin data — paraffin is usually quoted as regressing roughly 3×
+> faster than HTPB, yet HRAP's own HTPB entry is a = 0.198, n = 0.325. HRAP
+> also ships *identical* coefficients for ABS, asphalt and HTPB, which is the
+> signature of a placeholder rather than a measured fuel property.
+>
+> A low `a` forces a high oxidiser flow to reach a given O/F, which is why the
+> demo case shows `G_ox` starting around 1350 kg/m²/s. **Substitute your own
+> static-fire-derived a and n if you have them** — this single input moves the
+> sized orifice area more than the choice of flow model does, and it is the
+> reason to size with `mdot_ox` or `chamber_pressure` rather than an O/F target.
 
 ---
 
 ## Validation status
 
-102 tests pass (`python -m pytest tests/ -q`), covering:
+140 tests pass (`python -m pytest tests/ -q`), covering:
 
 - **Properties** — ESDU vs published saturated N2O values at 20 °C (P = 50.6 bar,
   ρ_l = 786, ρ_v = 158 kg/m³) to within 1–2 %; critical point exact;
@@ -359,8 +368,8 @@ optimum O/F 8.27 — and left fully editable.
 - **Limiting cases** — SPI is exactly `√(2ρΔP)`; SPI > Dyer > HEM for a
   saturated feed; `κ = 1` when saturated and Dyer is then the exact mean of the
   branches; Dyer collapses to SPI when the feed cannot flash; the L/D-weighted
-  blend → SPI as L/D → 0 and → HEM as L/D grows (the limits your brief asked
-  for); HEM chokes and plateaus, with a critical pressure ratio of 0.72.
+  blend → SPI as L/D → 0 and → HEM as L/D grows; HEM chokes and plateaus, with
+  a critical pressure ratio of 0.72.
 - **HRAP parity** — SPI reproduces HRAP's closed-form injector equation to
   machine precision; the liquid-mass, regression and `c*` formulas match HRAP's;
   propellant `.mat` round-trips including transposed CEA grids; the exported
@@ -376,6 +385,19 @@ optimum O/F 8.27 — and left fully editable.
   15-column variants, and recovery of the true injector ΔP. The comparison
   itself is checked both ways: identical runs must give ~0 % error, and a known
   10 % perturbation must show up as one.
+- **Chamber models** — the transient chamber is checked for *timestep
+  independence*, since the failure it replaced was an ignition ramp whose
+  duration tracked `dt`; the transient run must converge onto the quasi-steady
+  solution, which is its steady limit; chamber pressure may never exceed feed
+  pressure; and `transient-hrap` is pinned to HRAP's dt-dependent behaviour so
+  it is not "fixed" by accident.
+- **Plate drawing** — every hole lies on its declared bolt circle and is
+  equally spaced along it; overlapping holes are flagged rather than drawn;
+  the DXF is structurally valid R12 with its tables in the required order and
+  its text referencing a defined style; and — the one that matters — the DXF's
+  hole circles are compared coordinate-for-coordinate against the layout the
+  printed drawing was rendered from, so the sheet and the CAD file cannot
+  disagree about where a hole is.
 
 ### External validation against measured data
 
@@ -413,8 +435,8 @@ comparison was run.
 - `Cd = 0.7` remains a placeholder default, not a prediction. Cold-flow your
   own plate.
 
-**➜ See [VALIDATION.md](VALIDATION.md)** for the full validation roadmap, the
-measured input-sensitivity table, and every known limitation.
+**➜ See [VALIDATION.md](Validation/VALIDATION.md)** for the full validation
+roadmap, the measured input-sensitivity table, and every known limitation.
 
 ### Choosing a sizing objective
 
@@ -445,10 +467,12 @@ n2o_injector/
   motor.py        grain, tank blowdown, chamber, burn simulation
   sizing.py       O/F back-solve, CdA solver, plate realisation
   hrap_io.py      HRAP motor-config + output-CSV import, run comparison
+  config_io.py    save/load a full tool configuration as JSON
   report.py       design report, HRAP export, JSON/CSV export
   drawing.py      plate hole layout, DXF R12 writer, hole-table CSV
   plots.py        figures and the A4 drawing sheet (shared by GUI and scripts)
   gui.py          Tkinter interface
+  __main__.py     entry point for `python -m n2o_injector`
 tests/            140 validation tests
 examples/         scripted demo, the V2.2 trade study, generated outputs
 Trade Study/      V2.2 oxidiser-flow trade study (PDF) + the plate it recommends
