@@ -1,6 +1,7 @@
-# HASTE
+# HASTE Hybrid Applications and Sizing Tool Executeable
 
-*N2O / paraffin hybrid — injector sizing tool*
+WARNING: This software was made almost exclusively Claude Code, I published this to 
+serve as a useful tool for sizing and modeling in anyones own hybrid adventures.
 
 Sizes a multi-hole orifice plate for a liquid nitrous oxide injector on a
 N2O/paraffin hybrid rocket motor, modelling the two-phase flashing flow that
