@@ -155,7 +155,7 @@ def self_test() -> int:
         pass
     # --quiet suppresses the dialog so the test can run unattended.
     if "--quiet" not in sys.argv[1:]:
-        _report("N2O Injector Tool - self test", text)
+        _report("HASTE - self test", text)
     return 0 if ok else 1
 
 
@@ -181,7 +181,7 @@ def main() -> int:
         from n2o_injector.gui import main as gui_main
     except Exception:
         _report(
-            "N2O Injector Tool - startup failed",
+            "HASTE - startup failed",
             "The application could not start.\n\n"
             "This usually means a required package is missing. From a terminal:\n\n"
             "    pip install numpy scipy matplotlib\n\n"
@@ -193,7 +193,7 @@ def main() -> int:
         gui_main()
     except Exception:
         _report(
-            "N2O Injector Tool - error",
+            "HASTE - error",
             "The application stopped unexpectedly.\n\n" + traceback.format_exc(),
         )
         return 1

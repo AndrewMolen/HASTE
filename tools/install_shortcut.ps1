@@ -32,7 +32,7 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 $Launcher = Join-Path $Root 'run_app.pyw'
 $IconPath = Join-Path $Root 'assets\n2o_injector.ico'
-$Name = 'N2O Injector Sizing Tool'
+$Name = 'HASTE'
 
 $Desktop = [Environment]::GetFolderPath('Desktop')
 $StartMenu = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs'

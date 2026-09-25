@@ -32,7 +32,7 @@ To get a desktop icon instead of a terminal command:
 powershell -ExecutionPolicy Bypass -File tools\install_shortcut.ps1
 ```
 
-That adds **N2O Injector Sizing Tool** to the Desktop and Start Menu (so it also
+That adds **HASTE** to the Desktop and Start Menu (so it also
 appears in Windows search and can be pinned to the taskbar). It launches via
 `pythonw.exe`, so no console window appears. `-Uninstall` removes both.
 
@@ -53,8 +53,8 @@ Takes ~2.5 minutes and produces two flavours in `dist/`:
 
 | Build | Size | Launch | Use when |
 |---|---:|---:|---|
-| `dist/N2O Injector Sizing Tool/` (folder) | 449 MB | **~5 s** | day-to-day use *(recommended)* |
-| `dist/N2O Injector Sizing Tool.exe` (single file) | 156 MB | ~12 s | handing to someone else |
+| `dist/HASTE/` (folder) | 449 MB | **~5 s** | day-to-day use *(recommended)* |
+| `dist/HASTE.exe` (single file) | 156 MB | ~12 s | handing to someone else |
 
 The one-file build is smaller and portable, but unpacks the whole bundle to a
 temp directory on **every** launch, which is where its extra startup time goes.
@@ -70,7 +70,7 @@ powershell -ExecutionPolicy Bypass -File tools\install_shortcut.ps1 -UseExe
 **Verify a build** — this runs a real sizing calculation, not just a launch:
 
 ```bash
-"dist\N2O Injector Sizing Tool\N2O Injector Sizing Tool.exe" --self-test
+"dist\HASTE\HASTE.exe" --self-test
 ```
 
 It should report `SELF TEST: PASS` with `24 holes x 1.495 mm, mean O/F 7.89`,

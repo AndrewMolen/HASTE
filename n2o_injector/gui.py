@@ -118,7 +118,7 @@ class App(ttk.Frame):
     def __init__(self, master):
         super().__init__(master)
         self.pack(fill="both", expand=True)
-        master.title("N2O / Paraffin Hybrid -- Injector Sizing Tool")
+        master.title("HASTE -- N2O / Paraffin Hybrid Injector Sizing")
         master.geometry("1500x950")
 
         self._queue: queue.Queue = queue.Queue()

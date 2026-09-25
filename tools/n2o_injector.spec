@@ -1,11 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for the standalone N2O Injector Sizing Tool.
+"""PyInstaller spec for the standalone HASTE build.
 
 Builds two flavours from one analysis pass:
 
-* ``dist/N2O Injector Sizing Tool/`` -- one-folder build. Starts in about a
+* ``dist/HASTE/`` -- one-folder build. Starts in about a
   second because nothing has to be unpacked at launch. Best for day-to-day use.
-* ``dist/N2O Injector Sizing Tool.exe`` -- single-file build. One portable
+* ``dist/HASTE.exe`` -- single-file build. One portable
   file, but every launch extracts the whole bundle to a temp directory first,
   which with numpy/scipy/matplotlib is noticeably slower.
 
@@ -23,7 +23,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 ICON = os.path.join(ROOT, "assets", "n2o_injector.ico")
-APP_NAME = "N2O Injector Sizing Tool"
+APP_NAME = "HASTE"
 
 # CoolProp is the optional second N2O property backend. It ships data files
 # that will not be found unless they are collected explicitly.
