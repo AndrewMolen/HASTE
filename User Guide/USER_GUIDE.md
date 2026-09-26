@@ -516,6 +516,7 @@ is cut.
 | `instantaneous O/F deviates…by up to X%` | Large drift across the burn. | Decide whether the ends are acceptable. |
 | `injector pressure drop is very high (X%)` | Over-restrictive; wasting tank pressure. | Consider a larger injector. |
 | `rounding N holes to M changes area by X%` | Integer hole count. | Adjust hole diameter. |
+| `PLACEHOLDER REGRESSION COEFFICIENTS…` | You are sizing to an O/F target while still on HRAP's `a = 0.0304, n = 0.681` — which match the HTPB (Thiokol) entry in Karp & Jens Table 6.2, not paraffin. | Switch to `mdot_ox`/`chamber_pressure`, or pick a preset with stated provenance. |
 | `oxidiser flux peaks at X kg/m^2/s, above the ~700…` | `a·G^n` is being extrapolated past the range the correlation was fitted over. | Open the grain ports — `G_ox` is set by port area, not by the injector. Or accept it and say so. |
 | `oxidiser flux peaks at only X…below the ~50…` | Flux too low for the power law; radiation matters. | Smaller ports or more flow. |
 | `fuel web burned through` | Grain ran out before oxidiser. | Thicker web or shorter burn. |

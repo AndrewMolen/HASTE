@@ -855,6 +855,68 @@ def test_hrap_chamber_mode_keeps_hrap_discretisation(props, table):
     assert times[0] / times[2] > 2.0
 
 
+def test_hrap_paraffin_defaults_are_left_alone():
+    """These values must not be 'corrected'.
+
+    They are almost certainly HTPB coefficients wearing a paraffin label, but
+    they are also exactly what reproduces an HRAP run, and HRAP parity is a
+    validated capability. The fix is a different preset, not a different
+    default. This test exists to make that decision explicit rather than
+    rediscoverable.
+    """
+    from n2o_injector.propellant import PARAFFIN_DEFAULTS
+
+    assert PARAFFIN_DEFAULTS["reg_a"] == 0.0304
+    assert PARAFFIN_DEFAULTS["reg_n"] == 0.681
+    assert PARAFFIN_DEFAULTS["reg_m"] == 0.0
+
+
+def test_placeholder_coefficients_are_detected():
+    from n2o_injector.propellant import is_placeholder_regression
+
+    assert is_placeholder_regression(0.0304, 0.681)
+    assert not is_placeholder_regression(0.117, 0.620)     # paraffin SP1A
+    assert not is_placeholder_regression(0.0876, 0.3953)   # Liu N2O
+    assert not is_placeholder_regression(0.0304, 0.500)    # same a, different n
+
+
+def test_every_preset_carries_its_provenance():
+    """A bare (a, n) pair with no provenance is how this bug happened."""
+    from n2o_injector.propellant import FUEL_PRESETS, preset_provenance
+
+    for key, p in FUEL_PRESETS.items():
+        for field_ in ("reg_a", "reg_n", "reg_m", "rho_fuel", "opt_OF",
+                       "oxidiser", "composition", "source"):
+            assert field_ in p, f"{key} is missing {field_}"
+        assert preset_provenance(key), f"{key} renders no provenance line"
+
+
+def test_placeholder_plus_OF_objective_is_warned(props, table):
+    """The one combination that reliably produces a confidently wrong answer."""
+    cfg, _ = _demo_config()
+    assert cfg.propellant.reg_a == 0.0304  # the demo uses the HRAP defaults
+    res = size_injector(cfg, props, table,
+                        SizingTarget(objective="burn_average", OF=8.0))
+    assert any("PLACEHOLDER REGRESSION" in w for w in res.warnings)
+
+
+def test_placeholder_alone_is_not_warned(props, table):
+    """Flow-based objectives never touch the regression law, so no warning."""
+    cfg, _ = _demo_config()
+    res = size_injector(cfg, props, table,
+                        SizingTarget(objective="mdot_ox", mdot_ox=1.0))
+    assert not any("PLACEHOLDER REGRESSION" in w for w in res.warnings)
+
+
+def test_measured_coefficients_with_OF_objective_are_not_warned(props, table):
+    """Swapping in a real fit should silence the placeholder warning."""
+    cfg, _ = _demo_config()
+    cfg.propellant.reg_a, cfg.propellant.reg_n = 0.117, 0.620   # paraffin SP1A
+    res = size_injector(cfg, props, table,
+                        SizingTarget(objective="burn_average", OF=8.0))
+    assert not any("PLACEHOLDER REGRESSION" in w for w in res.warnings)
+
+
 def test_pressure_drop_is_measured_against_the_feed_pressure(props, table):
     """On a supercharged tank the injector sees the supercharge, not Psat.
 

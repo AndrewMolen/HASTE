@@ -35,6 +35,7 @@ from scipy.optimize import brentq, minimize_scalar
 
 from .injector import FlowModel, OrificeCurve, check_validity, recommend_model
 from .motor import BurnResult, MotorConfig, fuel_flow, required_mdot_ox, simulate
+from .propellant import is_placeholder_regression
 from .properties import PropertyBackend
 
 #: Approximate bounds of the oxidiser mass flux range over which published
@@ -602,6 +603,24 @@ def _populate_metrics(
     goal = float(np.mean(target.target_at(burn.t)))
     if goal > 0 and np.isfinite(burn.mean_OF):
         result.OF_error_pct = (burn.mean_OF - goal) / goal * 100.0
+
+    # Designing to an O/F target on the placeholder coefficients is the one
+    # combination that reliably produces a confidently wrong answer: the
+    # objective inverts the regression law, and the regression law describes a
+    # different fuel. Either alone is survivable; together they are not.
+    if (target.objective in ("design_point", "burn_average", "least_squares")
+            and cfg.regression_mode == "shifting"
+            and is_placeholder_regression(cfg.propellant.reg_a, cfg.propellant.reg_n)):
+        result.warnings.append(
+            "PLACEHOLDER REGRESSION COEFFICIENTS: a = 0.0304, n = 0.681 match the "
+            "HTPB (Thiokol) entry of Karp & Jens Table 6.2 to three significant "
+            "figures, and HRAP ships the same pair for ABS, asphalt and HTPB. They "
+            "are almost certainly not paraffin. You are sizing to an O/F target, "
+            "which inverts the regression law, so this error is amplified rather "
+            "than absorbed -- the returned plate is sized for a fuel you are not "
+            "burning. Either switch to the 'mdot_ox' or 'chamber_pressure' "
+            "objective, or select a fuel preset with stated provenance."
+        )
 
     # Conditioning of the O/F objectives against regression-coefficient error.
     n = cfg.propellant.reg_n

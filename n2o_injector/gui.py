@@ -48,7 +48,12 @@ from .plots import (
     build_results_figure,
     save_plate_drawing,
 )
-from .propellant import FUEL_PRESETS, Propellant
+from .propellant import (
+    DEFAULT_FUEL_PRESET,
+    FUEL_PRESETS,
+    Propellant,
+    preset_provenance,
+)
 from .properties import coolprop_available, get_backend
 from .report import (
     build_report,
@@ -150,6 +155,7 @@ class App(ttk.Frame):
 
         self._build_inputs(left)
         self._build_results(right)
+        self._show_provenance()
 
     def _build_inputs(self, parent):
         # Actions and status are pinned to the bottom, outside the scrollable
@@ -243,7 +249,7 @@ class App(ttk.Frame):
                               "total burning perimeter.")
 
         s = section("Propellant / regression")
-        self.fuel_var = tk.StringVar(value="Paraffin")
+        self.fuel_var = tk.StringVar(value=DEFAULT_FUEL_PRESET)
         ttk.Label(s, text="Preset").grid(row=0, column=0, sticky="w", padx=(6, 4))
         fcb = ttk.Combobox(s, textvariable=self.fuel_var, state="readonly", width=18,
                            values=list(FUEL_PRESETS))
@@ -263,6 +269,15 @@ class App(ttk.Frame):
                       "regardless of injector area.")
         self.f_constOF = Field(s, 10, "Constant O/F", 8.27, "",
                                "Only used by the constant_OF regression model.")
+
+        # Provenance of the selected preset, shown where the choice is made.
+        # A bare (a, n) pair with no stated oxidiser, flux range or fuel is how
+        # HRAP's HTPB coefficients came to be used as paraffin; putting the
+        # caveat next to the selector is the point of carrying the metadata.
+        self.prov_lbl = ttk.Label(s, text="", foreground="#a60", wraplength=300,
+                                  justify="left", font=("", 8))
+        self.prov_lbl.grid(row=11, column=0, columnspan=3, sticky="w",
+                           padx=(6, 6), pady=(2, 4))
 
         self.f_rega = Field(s, 1, "Regression a", 0.0304, "mm/s",
                             "rdot[mm/s] = a * G_ox^n * L^m, with G_ox in kg/m^2/s "
@@ -510,12 +525,24 @@ class App(ttk.Frame):
     # -------------------------------------------------------------- helpers
 
     def _apply_preset(self, _=None):
-        p = FUEL_PRESETS[self.fuel_var.get()]
+        key = self.fuel_var.get()
+        p = FUEL_PRESETS[key]
         self.f_rega.set(p["reg_a"])
         self.f_regn.set(p["reg_n"])
         self.f_regm.set(p["reg_m"])
         self.f_rhof.set(p["rho_fuel"])
         self.f_ofTarget.set(p["opt_OF"])
+        self._show_provenance(key)
+
+    def _show_provenance(self, key=None):
+        """Put the selected preset's provenance next to the selector."""
+        text = preset_provenance(key or self.fuel_var.get())
+        self.prov_lbl.configure(
+            text=text,
+            # Red for the entries that carry a real caveat, amber otherwise.
+            foreground="#a00" if "PLACEHOLDER" in text or "UNCONFIRMED" in text
+            else "#a60",
+        )
 
     def _load_prop(self):
         path = filedialog.askopenfilename(

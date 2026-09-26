@@ -341,20 +341,44 @@ entered as `time, O/F` pairs and selected with the `least_squares` objective.
 
 **Paraffin regression coefficients** default to HRAP's own shipped
 `Paraffin.mat` values — **a = 0.0304, n = 0.681, m = 0**, ρ = 900 kg/m³,
-optimum O/F 8.27 — and are fully editable.
+optimum O/F 8.27.
 
-> ⚠️ **This is the weakest input in the whole tool.** HRAP's paraffin
-> `a = 0.0304` gives ~1.1 mm/s at G = 200 kg/m²/s, which is low against commonly
-> cited paraffin data — paraffin is usually quoted as regressing roughly 3×
-> faster than HTPB, yet HRAP's own HTPB entry is a = 0.198, n = 0.325. HRAP
-> also ships *identical* coefficients for ABS, asphalt and HTPB, which is the
-> signature of a placeholder rather than a measured fuel property.
+> ⚠️ **These are almost certainly not paraffin coefficients.** The pair
+> `a = 0.0304, n = 0.681` matches the **HTPB (Thiokol)** entry of Table 6.2 in
+> Karp & Jens, *Hybrid Rocket Propulsion Design Handbook* (2024) to three
+> significant figures on both parameters — that table's SI coefficient is
+> 3.04e-5, which is 0.0304 in the mm/s convention used here. HRAP also ships
+> identical coefficients for ABS, asphalt and HTPB.
 >
-> A low `a` forces a high oxidiser flow to reach a given O/F, which is why the
-> demo case shows `G_ox` starting around 1350 kg/m²/s. **Substitute your own
-> static-fire-derived a and n if you have them** — this single input moves the
-> sized orifice area more than the choice of flow model does, and it is the
-> reason to size with `mdot_ox` or `chamber_pressure` rather than an O/F target.
+> They are kept unchanged **on purpose**: they are what reproduces an HRAP run,
+> and HRAP cross-referencing is a validated capability. Pick a different preset
+> instead. The tool warns if you size to an O/F target while still on them —
+> that combination inverts the regression law *and* uses the wrong fuel, which
+> is the one pairing that reliably produces a confidently wrong plate.
+
+**Every fuel preset carries its provenance** — oxidiser, the flux range it was
+fitted over, the fuel it actually describes, and the source — shown next to the
+selector in the GUI. A bare `(a, n)` pair with no provenance is exactly how
+HRAP's HTPB numbers came to be used as paraffin, so the metadata is not
+decoration.
+
+| Preset | a | n | oxidiser | notes |
+|---|---:|---:|---|---|
+| Paraffin (HRAP – HTPB coeffs) | 0.0304 | 0.681 | unspecified | placeholder; keep for HRAP parity |
+| Paraffin SP1A (Karp 6.2) | 0.117 | 0.620 | **unconfirmed** | 65 tests; oxidiser column lost in the PDF edition |
+| Paraffin FR5560 (Karp 6.2) | 0.169 | 0.600 | **unconfirmed** | 4 tests |
+| Paraffin+Al/Mg, N2O (Liu 2020) | 0.0876 | 0.3953 | **N2O** | G_ox 91–242; metallised, HTPB-bound — not neat paraffin |
+| Paraffin+Al/Mg, GOX (Liu 2020) | 0.0431 | 0.7232 | GOX | same fuel; shows how strongly `n` depends on oxidiser |
+
+The Liu pair is instructive: **same fuel, same rig, n = 0.395 on N2O versus
+0.723 on GOX.** Regression coefficients do not transfer across oxidisers, so an
+unlabelled table row cannot be borrowed — the level might carry near one
+operating point, the exponent never does.
+
+**Substitute your own static-fire-derived a and n as soon as you have them.**
+This single input moves the sized orifice area more than the choice of flow
+model does, and it is the reason to size with `mdot_ox` or `chamber_pressure`
+rather than an O/F target.
 
 ---
 

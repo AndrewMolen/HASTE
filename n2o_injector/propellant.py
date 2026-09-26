@@ -40,6 +40,20 @@ import numpy as np
 
 #: HRAP's paraffin configuration (``propellant_configs/Paraffin.mat``).
 #: Regression coefficients are ``[a, n, m]`` with ``a`` in mm/s.
+#:
+#: .. warning::
+#:    These are almost certainly **not paraffin coefficients**. The pair
+#:    ``a = 0.0304, n = 0.681`` matches, to three significant figures on both
+#:    parameters, the *HTPB (Thiokol)* entry of Table 6.2 in Karp & Jens,
+#:    *Hybrid Rocket Propulsion Design Handbook* (Elsevier, 2024) -- whose SI
+#:    coefficient is 3.04e-5, i.e. 0.0304 in the mm/s convention used here.
+#:    HRAP also ships identical coefficients for ABS, asphalt and HTPB, which
+#:    is the signature of a placeholder rather than a measured fuel property.
+#:
+#:    The values are kept **unchanged on purpose**: they are what reproduces an
+#:    HRAP run, and HRAP cross-referencing is a validated capability of this
+#:    tool. Do not "fix" them here -- pick a different preset instead, and see
+#:    ``FUEL_PRESETS`` for published alternatives with their provenance.
 PARAFFIN_DEFAULTS = {
     "name": "Paraffin (HRAP default)",
     "reg_a": 0.0304,
@@ -49,18 +63,120 @@ PARAFFIN_DEFAULTS = {
     "opt_OF": 8.27,
 }
 
-#: A few other HRAP-shipped fuels, for reference in the GUI.
+#: The regression pair that is really an HTPB dataset. Used by the sizing
+#: warning to detect that a design rests on the placeholder.
+PLACEHOLDER_REG = (0.0304, 0.681)
+
+
+def is_placeholder_regression(reg_a: float, reg_n: float, tol: float = 1e-4) -> bool:
+    """True if these coefficients are HRAP's mislabelled HTPB pair."""
+    return (abs(reg_a - PLACEHOLDER_REG[0]) < tol
+            and abs(reg_n - PLACEHOLDER_REG[1]) < tol)
+
+
+#: Selectable fuels, each carrying its provenance.
+#:
+#: Every entry states the oxidiser it was fitted against, the oxidiser flux
+#: range it was fitted over, and the fuel it actually describes. A bare
+#: ``(a, n)`` pair with no provenance is exactly how HRAP's HTPB coefficients
+#: came to be used as paraffin for years, so the metadata is not decoration.
+#:
+#: Units follow this tool's convention throughout:
+#: ``rdot [m/s] = 0.001 * a * G_ox^n``, with ``G_ox`` in kg/m^2/s. Sources that
+#: publish ``a`` in SI (rdot in m/s) are converted by x1000. Note that the
+#: units of ``a`` depend on ``n``, so two fits with different ``n`` cannot be
+#: compared by their ``a`` values alone -- compare regression rate at a matched
+#: flux instead (Karp & Jens section 6.5.2).
 FUEL_PRESETS = {
-    "Paraffin": dict(PARAFFIN_DEFAULTS),
-    "HTPB/Paraffin 50/50": {
+    "Paraffin (HRAP - HTPB coeffs)": {
+        **PARAFFIN_DEFAULTS,
+        "oxidiser": "unspecified",
+        "flux_range": None,
+        "composition": "labelled paraffin; coefficients match HTPB (Thiokol)",
+        "source": "HRAP Paraffin.mat; = Karp & Jens Table 6.2 HTPB (Thiokol)",
+        "note": "PLACEHOLDER. Keep for HRAP cross-referencing; do not design on it.",
+    },
+    "Paraffin SP1A (Karp 6.2)": {
+        "name": "Paraffin SP1A", "reg_a": 0.117, "reg_n": 0.620, "reg_m": 0.0,
+        "rho_fuel": 900.0, "opt_OF": 8.27,
+        "oxidiser": "UNCONFIRMED",
+        "flux_range": None,
+        "composition": "neat paraffin, SP1A",
+        "source": "Karp & Jens Table 6.2 (65 tests)",
+        "note": "Oxidiser column is lost in the PDF edition of the handbook. "
+                "Confirm against the printed table before designing on this.",
+    },
+    "Paraffin FR5560 (Karp 6.2)": {
+        "name": "Paraffin FR5560", "reg_a": 0.169, "reg_n": 0.600, "reg_m": 0.0,
+        "rho_fuel": 900.0, "opt_OF": 8.27,
+        "oxidiser": "UNCONFIRMED",
+        "flux_range": None,
+        "composition": "neat paraffin, FR5560",
+        "source": "Karp & Jens Table 6.2 (4 tests)",
+        "note": "Oxidiser unconfirmed, as above. Only 4 tests.",
+    },
+    "Paraffin+Al/Mg, N2O (Liu 2020)": {
+        "name": "Paraffin-HTPB-Al/Mg (N2O)",
+        "reg_a": 0.0876, "reg_n": 0.3953, "reg_m": 0.0,
+        "rho_fuel": 900.0, "opt_OF": 5.3,
+        "oxidiser": "N2O",
+        "flux_range": (91.0, 242.0),
+        "composition": "15% HTPB matrix, 65% paraffin, 4% PE, 5% Mg, 10% Al, "
+                       "copper chromite catalyst",
+        "source": "Liu et al., Aerosp. Sci. Technol. 107 (2020) 106269",
+        "note": "The only N2O-confirmed fit here, but NOT neat paraffin: metal "
+                "loaded and HTPB bound, so it regresses slower than neat "
+                "paraffin and its rate depends on chamber pressure. rho_fuel "
+                "is NOT the measured value for this composition.",
+    },
+    "Paraffin+Al/Mg, GOX (Liu 2020)": {
+        "name": "Paraffin-HTPB-Al/Mg (GOX)",
+        "reg_a": 0.0431, "reg_n": 0.7232, "reg_m": 0.0,
+        "rho_fuel": 900.0, "opt_OF": 1.9,
+        "oxidiser": "GOX",
+        "flux_range": (24.9, 58.5),
+        "composition": "as above",
+        "source": "Liu et al., Aerosp. Sci. Technol. 107 (2020) 106269",
+        "note": "Same fuel as the N2O entry. Included to show how strongly the "
+                "exponent depends on oxidiser: n = 0.723 here vs 0.395 on N2O.",
+    },
+    "HTPB/Paraffin 50/50 (HRAP)": {
         "name": "50P (HRAP)", "reg_a": 0.1146, "reg_n": 0.5036, "reg_m": 0.0,
         "rho_fuel": 900.0, "opt_OF": 7.893,
+        "oxidiser": "unspecified", "flux_range": None,
+        "composition": "50/50 HTPB/paraffin", "source": "HRAP 50P.mat",
+        "note": "",
     },
-    "HTPB": {
+    "HTPB (HRAP)": {
         "name": "HTPB (HRAP)", "reg_a": 0.198, "reg_n": 0.325, "reg_m": 0.0,
         "rho_fuel": 900.0, "opt_OF": 7.95,
+        "oxidiser": "unspecified", "flux_range": None,
+        "composition": "HTPB", "source": "HRAP HTPB.mat",
+        "note": "",
     },
 }
+
+
+#: Preset selected on startup. Deliberately still the HRAP pair: it is what
+#: reproduces an HRAP run, and changing the out-of-box numbers would silently
+#: alter every existing configuration. The GUI shows its provenance warning
+#: next to the selector instead.
+DEFAULT_FUEL_PRESET = "Paraffin (HRAP - HTPB coeffs)"
+
+
+def preset_provenance(key: str) -> str:
+    """One-line provenance for a preset, for display next to the selector."""
+    p = FUEL_PRESETS.get(key)
+    if not p:
+        return ""
+    bits = [f"oxidiser: {p.get('oxidiser', '?')}"]
+    fr = p.get("flux_range")
+    if fr:
+        bits.append(f"fitted over G_ox {fr[0]:.0f}-{fr[1]:.0f} kg/m2/s")
+    if p.get("source"):
+        bits.append(p["source"])
+    line = "  |  ".join(bits)
+    return f"{line}\n{p['note']}" if p.get("note") else line
 
 
 @dataclass
