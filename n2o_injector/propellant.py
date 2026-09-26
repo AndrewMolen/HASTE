@@ -99,23 +99,23 @@ FUEL_PRESETS = {
     "Paraffin SP1A (Karp 6.2)": {
         "name": "Paraffin SP1A", "reg_a": 0.117, "reg_n": 0.620, "reg_m": 0.0,
         "rho_fuel": 900.0, "opt_OF": 8.27,
-        # Circumstantial, but a coherent chain: Karp & Jens p93 records that the
-        # Peregrine rocket burned paraffin fuel SP1A, and their section 8.4
-        # describes Peregrine three times as an N2O/paraffin hybrid. The SP1A
-        # row carries 65 tests, the largest dataset in the table, consistent
-        # with that campaign, and chapter 6's references include Doran, Dyer,
-        # Lohner, Dunn, Cantwell & Zilliac, "Nitrous Oxide Hybrid Rocket Motor
-        # Fuel Regression Rate Characterization", AIAA 2007-5352 -- the
-        # Stanford/Ames group behind SP1A. None of that is the same as reading
-        # the column, so it stays flagged.
-        "oxidiser": "N2O (probable, not confirmed)",
+        # Probably GOX/O2, NOT N2O. Doran et al. (AIAA 2007-5352) Table 1
+        # reports N2O coefficients for HDPE, PMMA and HTPB in g/cm^2-s; convert
+        # by a_SI = a * 10^-n / 1000 and all three match Table 6.2 exactly on
+        # both parameters (1.16e-4/0.331, 1.31e-4/0.335, 1.88e-4/0.347). That
+        # locates the N2O block in the table. SP1A is its *first* row, far from
+        # that block, and figure 6.6 -- "HTPB combusting with O2", sourced from
+        # Table 6.2 -- points at the early rows. Doran also explicitly does not
+        # report SP1A coefficients (only 3 tests), so the 65-test row is from
+        # elsewhere. Peregrine burning SP1A on N2O is not enough to overcome
+        # the block ordering.
+        "oxidiser": "probably GOX/O2, NOT N2O",
         "flux_range": None,
-        "composition": "neat paraffin, SP1A (the Peregrine fuel)",
+        "composition": "neat paraffin, SP1A (Stanford; the Peregrine fuel)",
         "source": "Karp & Jens Table 6.2 (65 tests)",
-        "note": "Oxidiser inferred, not read: this PDF of the handbook drops "
-                "subscripted chemical formulas, so the whole oxidiser column is "
-                "blank. Confirm against AIAA 2007-5352 or a clean copy of the "
-                "book before designing on it.",
+        "note": "Sits in what appears to be the O2 block of Table 6.2. Note "
+                "n differs strongly by oxidiser, so a GOX fit is the wrong "
+                "thing to borrow for an N2O motor. Prefer the SP7 entries.",
     },
     "Paraffin FR5560 (Karp 6.2)": {
         "name": "Paraffin FR5560", "reg_a": 0.169, "reg_n": 0.600, "reg_m": 0.0,
@@ -125,6 +125,45 @@ FUEL_PRESETS = {
         "composition": "neat paraffin, FR5560",
         "source": "Karp & Jens Table 6.2 (4 tests)",
         "note": "Oxidiser unconfirmed, as above. Only 4 tests.",
+    },
+    # The two SP7 rows sit immediately after the three rows proven to be
+    # Doran's N2O data, i.e. inside the same merged oxidiser cell. SP7 is the
+    # Stanford/Karabeyoglu paraffin developed for the Mars Ascent Vehicle. The
+    # two fits disagree sharply and the table gives no basis to choose, so both
+    # are offered rather than one being picked arbitrarily.
+    "Paraffin SP7 a (Karp 6.2)": {
+        "name": "Paraffin SP7 (fit a)", "reg_a": 0.0781, "reg_n": 0.545,
+        "reg_m": 0.0, "rho_fuel": 900.0, "opt_OF": 8.27,
+        "oxidiser": "N2O (very likely)",
+        "flux_range": None,
+        "composition": "neat paraffin, SP7 (Mars Ascent Vehicle fuel)",
+        "source": "Karp & Jens Table 6.2 (10 tests)",
+        "note": "Adjacent to the rows proven to be N2O. Two SP7 fits exist and "
+                "they disagree; this is the lower one. Compare against 'SP7 b'.",
+    },
+    "Paraffin SP7 b (Karp 6.2)": {
+        "name": "Paraffin SP7 (fit b)", "reg_a": 0.280, "reg_n": 0.297,
+        "reg_m": 0.0, "rho_fuel": 900.0, "opt_OF": 8.27,
+        "oxidiser": "N2O (very likely)",
+        "flux_range": None,
+        "composition": "neat paraffin, SP7 (Mars Ascent Vehicle fuel)",
+        "source": "Karp & Jens Table 6.2 (8 tests)",
+        "note": "The other SP7 fit. Much flatter (n = 0.297) and much higher a. "
+                "The spread between the two SP7 rows is itself the uncertainty.",
+    },
+    # The only row in Table 6.2 whose oxidiser is *proven* rather than
+    # inferred: it matches Doran et al. AIAA 2007-5352 Table 1 exactly. Kept as
+    # a sanity anchor -- not a fuel you are likely to burn.
+    "HTPB (N2O, Doran 2007)": {
+        "name": "HTPB (N2O, Stanford)", "reg_a": 0.1876, "reg_n": 0.347,
+        "reg_m": 0.0, "rho_fuel": 920.0, "opt_OF": 7.95,
+        "oxidiser": "N2O (CONFIRMED)",
+        "flux_range": (30.0, 350.0),
+        "composition": "HTPB",
+        "source": "Doran et al., AIAA 2007-5352 Table 1 (15 tests)",
+        "note": "Oxidiser confirmed from the source paper, not inferred. "
+                "Published as a = 0.417 in g/cm2-s; converted here by "
+                "a x 10^-n. Useful as a known-good N2O anchor.",
     },
     "Paraffin+Al/Mg, N2O (Liu 2020)": {
         "name": "Paraffin-HTPB-Al/Mg (N2O)",
