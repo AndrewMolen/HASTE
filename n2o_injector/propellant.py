@@ -99,12 +99,23 @@ FUEL_PRESETS = {
     "Paraffin SP1A (Karp 6.2)": {
         "name": "Paraffin SP1A", "reg_a": 0.117, "reg_n": 0.620, "reg_m": 0.0,
         "rho_fuel": 900.0, "opt_OF": 8.27,
-        "oxidiser": "UNCONFIRMED",
+        # Circumstantial, but a coherent chain: Karp & Jens p93 records that the
+        # Peregrine rocket burned paraffin fuel SP1A, and their section 8.4
+        # describes Peregrine three times as an N2O/paraffin hybrid. The SP1A
+        # row carries 65 tests, the largest dataset in the table, consistent
+        # with that campaign, and chapter 6's references include Doran, Dyer,
+        # Lohner, Dunn, Cantwell & Zilliac, "Nitrous Oxide Hybrid Rocket Motor
+        # Fuel Regression Rate Characterization", AIAA 2007-5352 -- the
+        # Stanford/Ames group behind SP1A. None of that is the same as reading
+        # the column, so it stays flagged.
+        "oxidiser": "N2O (probable, not confirmed)",
         "flux_range": None,
-        "composition": "neat paraffin, SP1A",
+        "composition": "neat paraffin, SP1A (the Peregrine fuel)",
         "source": "Karp & Jens Table 6.2 (65 tests)",
-        "note": "Oxidiser column is lost in the PDF edition of the handbook. "
-                "Confirm against the printed table before designing on this.",
+        "note": "Oxidiser inferred, not read: this PDF of the handbook drops "
+                "subscripted chemical formulas, so the whole oxidiser column is "
+                "blank. Confirm against AIAA 2007-5352 or a clean copy of the "
+                "book before designing on it.",
     },
     "Paraffin FR5560 (Karp 6.2)": {
         "name": "Paraffin FR5560", "reg_a": 0.169, "reg_n": 0.600, "reg_m": 0.0,
