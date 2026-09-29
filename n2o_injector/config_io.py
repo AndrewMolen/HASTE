@@ -35,6 +35,10 @@ def save_config(
 ) -> str:
     """Write ``cfg`` (and optionally the sizing target) to a JSON file."""
     p = cfg.propellant
+    # Without a table reference the reload silently falls back to constant c*,
+    # so default to the file the table was actually loaded from.
+    if not propellant_file and p.has_table:
+        propellant_file = p.source_file
     data = {
         "schema": SCHEMA,
         "saved": datetime.now().isoformat(timespec="seconds"),

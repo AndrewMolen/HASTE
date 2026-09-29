@@ -250,6 +250,9 @@ class Propellant:
     k_grid: np.ndarray | None = field(default=None, repr=False)
     M_grid: np.ndarray | None = field(default=None, repr=False)
     T_grid: np.ndarray | None = field(default=None, repr=False)
+    #: Path the CEA table was loaded from, so a saved configuration can
+    #: reference it without the caller having to pass it along separately.
+    source_file: str = field(default="", repr=False)
 
     @property
     def has_table(self) -> bool:
@@ -415,4 +418,5 @@ class Propellant:
             k_grid=k_g,
             M_grid=M_g,
             T_grid=T_g,
+            source_file=path,
         )

@@ -43,7 +43,7 @@
     "opt_OF": 8.27,
     "cstar_const": 1550.0,
     "cstar_eff": 1.0,
-    "cea_table_file": ""
+    "cea_table_file": "Paraffin.mat"
   },
   "run": {
     "ambient_bar": 1.01325,
