@@ -44,8 +44,10 @@ from .plots import (
     build_comparison_figure,
     build_hrap_overlay_figure,
     build_injector_figure,
+    build_grain_drawing,
     build_plate_drawing,
     build_results_figure,
+    save_grain_drawing,
     save_plate_drawing,
 )
 from .propellant import (
@@ -62,6 +64,8 @@ from .report import (
     export_timeseries_csv,
 )
 from .config_io import load_config, save_config
+from .grain_drawing import grain_layout, suggested_grain_filename, write_grain_dxf
+from .grain_geometry import balanced_sector
 from .sizing import SizingTarget, analyse_geometry, size_injector
 from . import __version__
 
@@ -198,6 +202,11 @@ class App(ttk.Frame):
                              "pressure-fed above saturation. Leave blank for a "
                              "self-pressurising (saturated) tank.")
         self.f_amb = Field(s, 4, "Ambient pressure", 1.01325, "bar", "Ambient back pressure.")
+        self.f_valve = Field(s, 5, "Valve close time", "", "s",
+                             "Commanded shutdown: the run valve closes at this time and "
+                             "the burn ends. Leave blank to let the tank blow down. "
+                             "Closing just before the liquid runs out removes the "
+                             "vapour tail, which burns web for little impulse.")
 
         # ---- injector ----
         s = section("Injector")
@@ -241,12 +250,40 @@ class App(ttk.Frame):
         # ---- grain ----
         s = section("Fuel grain")
         self.f_grainL = Field(s, 0, "Grain length", 450.0, "mm", "Axial length of the grain.")
-        self.f_portID = Field(s, 1, "Initial port dia", 38.0, "mm", "Starting port diameter.")
+        self.f_portID = Field(s, 1, "Initial port dia", 38.0, "mm",
+                              "Starting port diameter. For the sector layout this is "
+                              "the round centre port.")
         self.f_grainOD = Field(s, 2, "Grain outer dia", 92.0, "mm",
                                "Outer diameter; sets the available web.")
         self.f_nports = Field(s, 3, "Number of ports", 1, "",
-                              "Identical circular ports. >1 uses total port area and "
-                              "total burning perimeter.")
+                              "Round layout only: identical circular ports. With more "
+                              "than one, the web shown is a nominal equal-area figure.")
+        self.layout_var = tk.StringVar(value="round")
+        ttk.Label(s, text="Port layout").grid(row=4, column=0, sticky="w", padx=(6, 4))
+        lcb = ttk.Combobox(s, textvariable=self.layout_var, state="readonly", width=18,
+                           values=["round", "sector"])
+        lcb.grid(row=4, column=1, columnspan=2, sticky="ew", padx=(0, 6), pady=1)
+        _Tooltip(lcb, "round: identical circular ports.\n"
+                      "sector: a round centre port plus annular-sector ports "
+                      "separated by constant-thickness spokes. Its web to the case "
+                      "is exact, and it uses the cross-section better than round "
+                      "ports do.")
+        self.f_nsect = Field(s, 5, "Sector ports", 4, "", "Sector layout only.")
+        self.f_ringweb = Field(s, 6, "Ring web", 0.0, "mm",
+                               "Sector layout: web between the centre port and the "
+                               "sectors. Burns from both faces.")
+        self.f_spokeweb = Field(s, 7, "Spoke web", 0.0, "mm",
+                                "Sector layout: spoke thickness. Burns from both faces.")
+        self.f_wallweb = Field(s, 8, "Wall web", 0.0, "mm",
+                               "Sector layout: web between the sectors and the case. "
+                               "Burns from one face -- this is the burn-through web.")
+        bal = ttk.Button(s, text="Balance sector webs (keep port area)",
+                         command=self._balance_sector)
+        bal.grid(row=9, column=0, columnspan=3, sticky="ew", padx=6, pady=(4, 2))
+        _Tooltip(bal, "Sets the centre port and the three webs so every web burns "
+                      "through at the same regression depth, with the centre and "
+                      "sector ports at equal hydraulic diameter. Total port area is "
+                      "kept, so initial oxidiser flux does not change.")
 
         s = section("Propellant / regression")
         self.fuel_var = tk.StringVar(value=DEFAULT_FUEL_PRESET)
@@ -501,9 +538,36 @@ class App(ttk.Frame):
         self.plate_canvas.mpl_connect("resize_event", self._plate_resized)
         self._plate_resize_job = None
 
+        # fuel grain drawing
+        gf = ttk.Frame(nb)
+        nb.add(gf, text="Grain drawing")
+        bar = ttk.Frame(gf)
+        bar.pack(fill="x", padx=4, pady=(4, 0))
+        ttk.Label(bar, text="Part no").pack(side="left")
+        self.gdwg_part = tk.StringVar(value="")
+        ttk.Entry(bar, textvariable=self.gdwg_part, width=16).pack(side="left", padx=(3, 8))
+        ttk.Label(bar, text="Material").pack(side="left")
+        self.gdwg_material = tk.StringVar(value="")
+        ttk.Entry(bar, textvariable=self.gdwg_material, width=16).pack(side="left", padx=(3, 8))
+        ttk.Button(bar, text="Redraw", width=8,
+                   command=self._redraw_grain).pack(side="left", padx=2)
+        ttk.Button(bar, text="Save sheet...", width=14,
+                   command=self._save_grain_drawing).pack(side="right", padx=2)
+        ttk.Button(bar, text="Export DXF...", width=14,
+                   command=self._export_grain_dxf).pack(side="right", padx=2)
+        self.grain_fig = Figure(figsize=(11.69, 8.27), dpi=100)
+        self.grain_canvas = FigureCanvasTkAgg(self.grain_fig, master=gf)
+        self.grain_canvas.get_tk_widget().pack(fill="both", expand=True)
+        NavigationToolbar2Tk(self.grain_canvas, gf).update()
+        self.grain_canvas.mpl_connect("resize_event", self._grain_resized)
+        self._grain_resize_job = None
+        self._grain_layout = None
+        self._grain_meta = None
+
         # HRAP cross-reference
         hf = ttk.Frame(nb)
         nb.add(hf, text="HRAP cross-reference")
+        self._hrap_tab = hf
         hpane = ttk.PanedWindow(hf, orient="vertical")
         hpane.pack(fill="both", expand=True)
 
@@ -592,6 +656,12 @@ class App(ttk.Frame):
         self.f_portID.set(round(cfg.grain.port_id * 1e3, 4))
         self.f_grainOD.set(round(cfg.grain.outer_d * 1e3, 4))
         self.f_nports.set(cfg.grain.n_ports)
+        self.layout_var.set(cfg.grain.layout)
+        self.f_nsect.set(cfg.grain.n_sectors)
+        self.f_ringweb.set(round(cfg.grain.ring_web * 1e3, 4))
+        self.f_spokeweb.set(round(cfg.grain.spoke_web * 1e3, 4))
+        self.f_wallweb.set(round(cfg.grain.wall_web * 1e3, 4))
+        self.f_valve.set("" if cfg.valve_close_t is None else cfg.valve_close_t)
 
         self.f_rega.set(cfg.propellant.reg_a)
         self.f_regn.set(cfg.propellant.reg_n)
@@ -720,7 +790,7 @@ class App(ttk.Frame):
         self.hrap_canvas.draw()
         self.hrap_txt.delete("1.0", "end")
         self.hrap_txt.insert("1.0", format_comparison(cmp, cfg.injector.model.value))
-        self.nb.select(3)
+        self.nb.select(self._hrap_tab)
 
         worst = max((c.rms_pct for c in cmp.channels), default=float("nan"))
         self.status.configure(
@@ -769,12 +839,7 @@ class App(ttk.Frame):
             ox_mass=self.f_oxm.get(),
             supercharge_P=(float(sup) * BAR if sup else None),
         )
-        grain = Grain(
-            length=self.f_grainL.get() / 1e3,
-            port_id=self.f_portID.get() / 1e3,
-            outer_d=self.f_grainOD.get() / 1e3,
-            n_ports=self.f_nports.get(int),
-        )
+        grain = self._grain()
         noz = Nozzle(
             throat_d=self.f_thrt.get() / 1e3,
             expansion_ratio=self.f_er.get(),
@@ -801,6 +866,8 @@ class App(ttk.Frame):
             const_OF=self.f_constOF.get(),
             chamber_volume=getattr(self, "_chamber_volume", 0.0),
             initial_Pc=getattr(self, "_initial_Pc", None),
+            valve_close_t=(float(self.f_valve.var.get()) if self.f_valve.var.get().strip()
+                           else None),
         )
 
         pt, pof = self._parse_profile()
@@ -815,6 +882,45 @@ class App(ttk.Frame):
             min_dP_fraction=self.f_dPmin.get() / 100.0,
         )
         return cfg, target
+
+    def _grain(self, layout: str | None = None) -> Grain:
+        return Grain(
+            length=self.f_grainL.get() / 1e3,
+            port_id=self.f_portID.get() / 1e3,
+            outer_d=self.f_grainOD.get() / 1e3,
+            n_ports=self.f_nports.get(int),
+            layout=layout or self.layout_var.get(),
+            n_sectors=self.f_nsect.get(int),
+            ring_web=self.f_ringweb.get() / 1e3,
+            spoke_web=self.f_spokeweb.get() / 1e3,
+            wall_web=self.f_wallweb.get() / 1e3,
+        )
+
+    def _balance_sector(self):
+        """Convert the current grain to a balanced sector layout, same port area."""
+        try:
+            g = self._grain()
+            if g.validate():
+                # Sector fields not filled in yet: take the port area from the
+                # round-port interpretation of the fields.
+                g = self._grain("round")
+                if g.validate():
+                    raise ValueError("; ".join(g.validate()))
+            area = g.port_area(g.port_id)
+            b = balanced_sector(g.outer_d, area, self.f_nsect.get(int))
+        except Exception as exc:
+            messagebox.showerror("Cannot balance", str(exc))
+            return
+        self.layout_var.set("sector")
+        self.f_portID.set(round(b["centre_d"] * 1e3, 3))
+        self.f_ringweb.set(round(b["ring_web"] * 1e3, 3))
+        self.f_spokeweb.set(round(b["spoke_web"] * 1e3, 3))
+        self.f_wallweb.set(round(b["wall_web"] * 1e3, 3))
+        self.status.configure(
+            text=f"Balanced sector grain: port area {area * 1e6:.0f} mm^2 kept, "
+                 f"wall web {b['wall_web'] * 1e3:.2f} mm.",
+            foreground="#060",
+        )
 
     def _backend(self):
         name = self.prop_backend.get()
@@ -974,6 +1080,7 @@ class App(ttk.Frame):
         self.canvas.draw()
 
         self._draw_plate(res, cfg)
+        self._draw_grain(cfg, res)
 
         flag = "" if res.dP_margin_ok else "  [dP margin LOW]"
         colour = "#060" if (res.dP_margin_ok and not res.warnings) else "#a60"
@@ -1108,6 +1215,130 @@ class App(ttk.Frame):
             messagebox.showerror("Export failed", str(exc))
             return
         self.status.configure(text=f"Hole table written to {path}", foreground="#060")
+
+    # ------------------------------------------------------- grain drawing
+
+    def _draw_grain(self, cfg=None, res=None):
+        """Rebuild the grain sheet from the inputs alone.
+
+        A sizing result, when there is one for this grain, adds the simulated
+        web usage to the notes.
+        """
+        if cfg is None:
+            try:
+                cfg, _ = self._collect()
+            except Exception as exc:
+                messagebox.showerror("Invalid input", str(exc))
+                return False
+        errs = cfg.grain.validate()
+        if errs:
+            messagebox.showerror("Invalid grain", "\n\n".join(errs))
+            return False
+        meta = default_meta(cfg, part_no=self.gdwg_part.get().strip())
+        meta.title = "FUEL GRAIN"
+        meta.flow_model = ""
+        meta.material = self.gdwg_material.get().strip()
+        if res is not None and np.isfinite(res.web_used_frac):
+            p = cfg.propellant
+            line = (f"SIMULATED REGRESSION {res.regression_max * 1e3:.2f} OF "
+                    f"{cfg.grain.web * 1e3:.2f} mm WALL WEB "
+                    f"({res.web_used_frac * 100:.0f}%) WITH a = {p.reg_a:g}, n = {p.reg_n:g}")
+            if cfg.valve_close_t is not None:
+                line += f", RUN VALVE CLOSED AT {cfg.valve_close_t:g} s"
+            line += ". REGRESSION COEFFICIENTS ARE NOT MEASURED ON THIS MOTOR."
+            meta.notes.append(("! " if res.web_used_frac > 0.85 else "") + line)
+        self._grain_meta = meta
+        self._grain_layout = grain_layout(cfg.grain, cfg.nozzle, cfg.propellant)
+        build_grain_drawing(self.grain_fig, self._grain_layout, meta=meta,
+                            version=__version__)
+        self.grain_canvas.draw()
+        return True
+
+    def _redraw_grain(self):
+        try:
+            cfg, _ = self._collect()
+        except Exception as exc:
+            messagebox.showerror("Invalid input", str(exc))
+            return
+        # Keep the simulated web note only while the grain matches the run it
+        # came from; after an edit that number describes a different grain.
+        res = None
+        if self._result is not None and self._cfg is not None \
+                and cfg.grain == self._cfg.grain:
+            res = self._result
+        if self._draw_grain(cfg, res):
+            self.status.configure(text="Grain drawing updated.", foreground="#060")
+
+    def _grain_resized(self, _event=None):
+        if self._grain_layout is None:
+            return
+        if self._grain_resize_job is not None:
+            try:
+                self.after_cancel(self._grain_resize_job)
+            except Exception:
+                pass
+        self._grain_resize_job = self.after(250, self._grain_resize_redraw)
+
+    def _grain_resize_redraw(self):
+        self._grain_resize_job = None
+        if self._grain_layout is None:
+            return
+        build_grain_drawing(self.grain_fig, self._grain_layout,
+                            meta=self._grain_meta, version=__version__)
+        self.grain_canvas.draw_idle()
+
+    def _grain_ready(self):
+        if self._grain_layout is None and not self._draw_grain():
+            return False
+        self._grain_meta.part_no = self.gdwg_part.get().strip()
+        self._grain_meta.material = self.gdwg_material.get().strip()
+        return True
+
+    def _save_grain_drawing(self):
+        if not self._grain_ready():
+            return
+        path = filedialog.asksaveasfilename(
+            title="Save grain drawing sheet",
+            initialfile=suggested_grain_filename(self._grain_layout, ".pdf",
+                                                 self.gdwg_part.get()),
+            defaultextension=".pdf",
+            filetypes=[("PDF (vector, prints to scale)", "*.pdf"),
+                       ("PNG image", "*.png"), ("SVG (vector)", "*.svg"),
+                       ("All", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            save_grain_drawing(path, self._grain_layout, meta=self._grain_meta,
+                               version=__version__, dpi=300)
+        except Exception as exc:
+            messagebox.showerror("Save failed", str(exc))
+            return
+        self.status.configure(
+            text=f"Grain drawing saved to {path} (A4 landscape; print at 100% for scale).",
+            foreground="#060")
+
+    def _export_grain_dxf(self):
+        if not self._grain_ready():
+            return
+        path = filedialog.asksaveasfilename(
+            title="Export grain DXF for CAD / mandrel",
+            initialfile=suggested_grain_filename(self._grain_layout, ".dxf",
+                                                 self.gdwg_part.get()),
+            defaultextension=".dxf",
+            filetypes=[("DXF R12", "*.dxf"), ("All", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            write_grain_dxf(path, self._grain_layout, meta=self._grain_meta)
+        except Exception as exc:
+            messagebox.showerror("Export failed", str(exc))
+            return
+        self.status.configure(
+            text=f"Grain DXF written to {path} -- full scale in mm, layers "
+                 "GRAIN_OUTLINE / PORTS / CENTRELINES / SECTION / ANNOTATION.",
+            foreground="#060")
 
     def _export(self, kind):
         if self._result is None:

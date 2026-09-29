@@ -6,6 +6,8 @@ PNG is exactly what the GUI shows.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 BAR = 1e5
@@ -495,17 +497,39 @@ def build_plate_drawing(fig, layout, meta=None, version=""):
             s.text(table_x + 46, dy2, value, h=2.0)
             dy2 -= 3.6
 
-    # ---- notes -----------------------------------------------------------
+    # ---- notes and title block ------------------------------------------
+    _notes_block(s, _plate_notes(layout, m), M, blocks_top, tb_x)
+    dash = "—"
+    src = "HASTE" + (f" v{version}" if version else "")
+    if m.flow_model:
+        src += f" — {m.flow_model} model, Cd {layout.Cd:.3f}"
+    _title_block(s, m.title, [
+        ("PROJECT", m.project or dash),
+        ("PART NO", m.part_no or dash),
+        ("MATERIAL", m.material or dash),
+        ("PLATE", f"⌀{layout.plate_d:.2f} × {layout.thickness:.2f} THK"),
+        ("HOLES", f"{layout.n_holes} × ⌀{layout.hole_d:.3f} THRU"),
+        ("SCALE", f"{_scale_text(scale)}   UNITS mm"),
+        ("DRAWN", f"{m.drawn_by or dash}    {m.date}"),
+    ], src, M, blocks_top, tb_x)
+    return s.ax
+
+
+def _notes_block(s, notes, M, blocks_top, tb_x):
+    """Numbered notes left of the title block, plus the print-scale check bar.
+
+    Lines beginning ``!`` are rendered as warnings.
+    """
+    import textwrap
+
     s.line(M, blocks_top, SHEET_W - M, blocks_top, lw=0.5)
     s.line(tb_x, M, tb_x, blocks_top, lw=0.5)
     s.text(M + 3, blocks_top - 5.0, "NOTES", h=2.4, weight="bold")
 
     # Wrap first, then choose the line pitch that fits what wrapping produced,
     # so a long note shrinks the block rather than running off the sheet.
-    import textwrap
-
     wrapped = []
-    for i, note in enumerate(_plate_notes(layout, m), start=1):
+    for i, note in enumerate(notes, start=1):
         bad = note.startswith("!")
         for k, part in enumerate(textwrap.wrap(note.lstrip("! "), 112)):
             wrapped.append((f"{i}." if k == 0 else "", part, bad))
@@ -533,28 +557,15 @@ def build_plate_drawing(fig, layout, meta=None, version=""):
     s.text(bx - 3.0, by - 0.7, "CHECK BAR — 50 mm ON PAPER:", h=1.9,
            color=LIGHT, ha="right")
 
-    # ---- title block -----------------------------------------------------
-    dash = "—"
-    s.text(tb_x + 3, blocks_top - 6.0, m.title, h=3.4, weight="bold")
-    rows_tb = [
-        ("PROJECT", m.project or dash),
-        ("PART NO", m.part_no or dash),
-        ("MATERIAL", m.material or dash),
-        ("PLATE", f"⌀{layout.plate_d:.2f} × {layout.thickness:.2f} THK"),
-        ("HOLES", f"{layout.n_holes} × ⌀{layout.hole_d:.3f} THRU"),
-        ("SCALE", f"{_scale_text(scale)}   UNITS mm"),
-        ("DRAWN", f"{m.drawn_by or dash}    {m.date}"),
-    ]
+
+def _title_block(s, title, rows, src, M, blocks_top, tb_x):
+    s.text(tb_x + 3, blocks_top - 6.0, title, h=3.4, weight="bold")
     ry = blocks_top - 11.0
-    for label, value in rows_tb:
+    for label, value in rows:
         s.text(tb_x + 3, ry, label, h=1.9, color=LIGHT)
         s.text(tb_x + 24, ry, value, h=2.2)
         ry -= 4.3
-    src = "HASTE" + (f" v{version}" if version else "")
-    if m.flow_model:
-        src += f" — {m.flow_model} model, Cd {layout.Cd:.3f}"
     s.text(tb_x + 3, M + 2.5, src, h=1.8, color=LIGHT)
-    return s.ax
 
 
 def _plate_notes(layout, meta):
@@ -617,3 +628,220 @@ def plt_circle(x, y, r, face="none", edge="k", lw=1.0, ls="-"):
     from matplotlib.patches import Circle
 
     return Circle((x, y), r, facecolor=face, edgecolor=edge, linewidth=lw, linestyle=ls)
+
+
+# --------------------------------------------------------------------------
+# Fuel grain drawing sheet
+# --------------------------------------------------------------------------
+
+
+def _sector_polygon(port, cx, cy, scale, n_arc=48):
+    """Sheet-mm polygon of one sector port from its exact outline."""
+    r1, a10, a11 = port["inner"]
+    r2, a20, a21 = port["outer"]
+    pts = []
+    for k in range(n_arc + 1):  # outer arc, counter-clockwise
+        a = math.radians(a20 + (a21 - a20) * k / n_arc)
+        pts.append((cx + r2 * scale * math.cos(a), cy + r2 * scale * math.sin(a)))
+    for k in range(n_arc + 1):  # inner arc, back the other way
+        a = math.radians(a11 - (a11 - a10) * k / n_arc)
+        pts.append((cx + r1 * scale * math.cos(a), cy + r1 * scale * math.sin(a)))
+    return pts
+
+
+def build_grain_drawing(fig, layout, meta=None, version=""):
+    """Render the fuel grain as a dimensioned A4 drawing.
+
+    ``layout`` is a :class:`n2o_injector.grain_drawing.GrainLayout`, the same
+    object :func:`~n2o_injector.grain_drawing.write_grain_dxf` exports.
+    """
+    from matplotlib.patches import Polygon
+
+    from .drawing import DrawingMeta
+    from .grain_drawing import port_callouts, section_bands
+    from .grain_geometry import sector_outlines
+
+    m = (meta or DrawingMeta(title="FUEL GRAIN")).stamped()
+    s = _sheet_axes(fig)
+
+    M = 10.0
+    s.rect(M, M, SHEET_W - 2 * M, SHEET_H - 2 * M, lw=0.7)
+    blocks_top = 52.0
+    tb_x = 180.0
+    split_x = 150.0               # cross-section left, section + data right
+
+    FUEL = "#f1ece0"
+    cl = (0, (9, 2.5, 1.5, 2.5))
+
+    # ---- cross-section --------------------------------------------------
+    top = SHEET_H - M
+    cx = (M + split_x) / 2.0
+    cy = (blocks_top + top) / 2.0 - 4.0
+    room = min(split_x - M - 16.0, top - blocks_top - 36.0)
+    scale = _pick_scale(layout.outer_d, room)
+    R = layout.R * scale
+    s.circle(cx, cy, R, lw=0.6, face=FUEL)
+    s.line(cx - R * 1.12, cy, cx + R * 1.12, cy, lw=0.2, color=LIGHT, ls=cl)
+    s.line(cx, cy - R * 1.12, cx, cy + R * 1.12, lw=0.2, color=LIGHT, ls=cl)
+
+    if layout.layout == "sector":
+        s.circle(cx, cy, 0.5 * layout.port_d * scale, lw=0.4, face=HOLE_FILL, zorder=3)
+        for port in sector_outlines(layout.outer_d, layout.port_d, layout.ring_web,
+                                    layout.spoke_web, layout.n_sectors, layout.wall_web):
+            s.ax.add_patch(Polygon(_sector_polygon(port, cx, cy, scale), closed=True,
+                                   facecolor=HOLE_FILL, edgecolor=INK,
+                                   linewidth=0.4 * s.pt, zorder=3))
+        for k in range(layout.n_sectors):  # spoke centrelines
+            a = 2 * math.pi * k / layout.n_sectors
+            s.line(cx, cy, cx + R * 1.08 * math.cos(a), cy + R * 1.08 * math.sin(a),
+                   lw=0.15, color=LIGHT, ls=cl, zorder=4)
+        # Spoke thickness, across the spoke that points straight up if there is one.
+        if any(abs(360.0 * k / layout.n_sectors - 90.0) < 1e-6
+               for k in range(layout.n_sectors)):
+            h = 0.5 * layout.spoke_web * scale
+            ym = cy + 0.5 * (layout.r1 + layout.r2) * scale
+            s.dim(cx - h, ym, cx + h, ym, f"{layout.spoke_web:.2f}", h=2.1, off=0.8)
+        # Wall web, dimensioned radially through the middle of a lower sector.
+        a_d = -math.pi / 4 if layout.n_sectors % 4 == 0 else -math.pi / layout.n_sectors
+        ux, uy = math.cos(a_d), math.sin(a_d)
+        s.ax.annotate("", xy=(cx + layout.r2 * scale * ux, cy + layout.r2 * scale * uy),
+                      xytext=(cx + R * ux, cy + R * uy),
+                      arrowprops=dict(arrowstyle="<|-|>", color=ACCENT,
+                                      lw=0.25 * s.pt, shrinkA=0, shrinkB=0,
+                                      mutation_scale=2.2 * s.pt), zorder=5)
+        s.text(cx + (R + 2.0) * ux, cy + (R + 2.0) * uy,
+               f"WALL WEB {layout.wall_web:.2f}", h=2.1, color=ACCENT, va="top")
+    else:
+        for (x, y) in layout.round_ports:
+            s.circle(cx + x * scale, cy + y * scale, 0.5 * layout.port_d * scale,
+                     lw=0.4, face=HOLE_FILL, zorder=3)
+        if layout.n_ports > 1:
+            s.circle(cx, cy, layout.port_circle_r * scale, lw=0.15, color=LIGHT, ls=cl)
+
+    # Section line A-A through the axis.
+    a_sec = layout.section_angle
+    ex, ey = math.cos(a_sec) * R * 1.15, math.sin(a_sec) * R * 1.15
+    s.line(cx - ex, cy - ey, cx + ex, cy + ey, lw=0.3, color=ACCENT,
+           ls=(0, (6, 2)), zorder=4)
+    for sgn in (-1, 1):
+        s.text(cx + sgn * ex * 1.07, cy + sgn * ey * 1.07, "A", h=3.0, color=ACCENT,
+               ha="center", va="center", weight="bold")
+
+    # Outside diameter.
+    dy = cy - R - 7.0
+    for sx in (-R, R):
+        s.line(cx + sx, cy, cx + sx, dy - 2.0, lw=0.15, color=ACCENT)
+    s.dim(cx - R, dy, cx + R, dy, f"⌀{layout.outer_d:.2f}")
+
+    # Port callouts, top-left.
+    rx, ry = M + 3.0, top - 5.0
+    s.text(rx, ry, "PORTS", h=2.4, weight="bold")
+    for i, line in enumerate(port_callouts(layout)):
+        s.text(rx, ry - 3.8 * (i + 1), line, h=2.0)
+    s.text(cx, blocks_top + 3.0,
+           f"CROSS-SECTION FROM FORWARD END   SCALE {_scale_text(scale)}",
+           h=2.2, color=LIGHT, ha="center")
+
+    # ---- side section A-A ------------------------------------------------
+    s.line(split_x, blocks_top, split_x, top, lw=0.5)
+    sx0, sx1 = split_x + 8.0, SHEET_W - M - 8.0
+    sscale = min(_pick_scale(layout.length, sx1 - sx0), _pick_scale(layout.outer_d, 50.0))
+    Ls, Rs = layout.length * sscale, layout.R * sscale
+    scx = 0.5 * (sx0 + sx1)
+    scy = top - 12.0 - Rs
+    x_lo = scx - 0.5 * Ls
+    s.rect(x_lo, scy - Rs, Ls, 2 * Rs, lw=0.0, color="#c9bfa8", face=FUEL,
+           hatch="///", zorder=1)
+    for lo, hi in section_bands(layout):
+        s.rect(x_lo, scy + lo * sscale, Ls, (hi - lo) * sscale, lw=0.0,
+               color=HOLE_FILL, face=HOLE_FILL, zorder=2)
+        for yv in (lo, hi):
+            s.line(x_lo, scy + yv * sscale, x_lo + Ls, scy + yv * sscale, lw=0.35, zorder=3)
+    s.rect(x_lo, scy - Rs, Ls, 2 * Rs, lw=0.5, zorder=3)
+    s.line(x_lo - 3, scy, x_lo + Ls + 3, scy, lw=0.15, color=LIGHT, ls=cl, zorder=4)
+    s.dim(x_lo, scy - Rs - 4.5, x_lo + Ls, scy - Rs - 4.5, f"{layout.length:.2f}",
+          h=2.1, off=0.8)
+    s.text(scx, top - 5.0, f"SECTION A–A   SCALE {_scale_text(sscale)}",
+           h=2.2, color=LIGHT, ha="center")
+
+    # ---- design data -----------------------------------------------------
+    dx0, dyy = split_x + 5.0, scy - Rs - 15.0
+    s.text(dx0, dyy, "DESIGN DATA", h=2.4, weight="bold")
+    between = layout.between_ports
+    data = [
+        ("PORT AREA", f"{layout.port_area:.1f} mm²"),
+        ("BURNING PERIMETER", f"{layout.perimeter:.1f} mm"),
+        ("BURNING SURFACE", f"{layout.burn_surface / 100:.0f} cm²"),
+        ("WALL WEB (TO CASE)", f"{layout.wall_web_actual:.2f} mm"),
+        ("WEB BETWEEN PORTS", f"{between:.2f} mm" if math.isfinite(between) else "—"),
+    ]
+    if math.isfinite(layout.port_throat_ratio):
+        data.append(("PORT / THROAT AREA", f"{layout.port_throat_ratio:.2f}"))
+    if math.isfinite(layout.fuel_mass):
+        data.append(("FUEL MASS", f"{layout.fuel_mass:.3f} kg"))
+    yy = dyy - 5.0
+    for label, value in data:
+        s.text(dx0, yy, label, h=2.0, color=LIGHT)
+        s.text(dx0 + 48, yy, value, h=2.0)
+        yy -= 3.6
+
+    # ---- notes and title block ------------------------------------------
+    _notes_block(s, _grain_notes(layout, m), M, blocks_top, tb_x)
+    dash = "—"
+    ports = (f"CENTRE + {layout.n_sectors} SECTOR" if layout.layout == "sector"
+             else f"{layout.n_ports} × ⌀{layout.port_d:.2f}")
+    _title_block(s, m.title, [
+        ("PROJECT", m.project or dash),
+        ("PART NO", m.part_no or dash),
+        ("MATERIAL", m.material or dash),
+        ("GRAIN", f"⌀{layout.outer_d:.2f} × {layout.length:.2f}"),
+        ("PORTS", ports),
+        ("SCALE", f"{_scale_text(scale)} / {_scale_text(sscale)}   UNITS mm"),
+        ("DRAWN", f"{m.drawn_by or dash}    {m.date}"),
+    ], "HASTE" + (f" v{version}" if version else ""), M, blocks_top, tb_x)
+    return s.ax
+
+
+def _grain_notes(layout, meta):
+    """The grain notes block. Lines beginning ``!`` are rendered as warnings."""
+    notes = [
+        "ALL DIMENSIONS IN MILLIMETRES. ORIGIN ON THE GRAIN AXIS. CROSS-SECTION IS "
+        "VIEWED FROM THE FORWARD (INJECTOR) END. PORTS RUN THE FULL LENGTH.",
+    ]
+    if layout.layout == "sector":
+        fillet = 2.0
+        loss = layout.n_sectors * 4 * (1 - math.pi / 4) * fillet**2
+        notes.append(
+            "SPOKES ARE CONSTANT THICKNESS: EACH SECTOR SIDE IS PARALLEL TO ITS SPOKE "
+            "CENTRELINE, NOT RADIAL. INNER AND OUTER PORT WALLS ARE ARCS ON THE GRAIN AXIS."
+        )
+        notes.append(
+            f"PORT CORNERS ARE DRAWN SHARP. CAST WITH R{fillet:g} FILLETS TO AVOID "
+            f"CRACKING; THIS REMOVES ABOUT {loss:.0f} mm² "
+            f"({100 * loss / layout.port_area:.1f}%) OF PORT AREA."
+        )
+        if (abs(layout.ring_web - 2 * layout.wall_web) > 0.05
+                or abs(layout.spoke_web - 2 * layout.wall_web) > 0.05):
+            notes.append("! WEBS ARE NOT BALANCED: SPOKE AND RING WEBS SHOULD BE TWICE THE "
+                         "WALL WEB, OR THE PORTS MERGE BEFORE THE WALL BURNS THROUGH (OR "
+                         "THE REVERSE) AND LEAVE SLIVERS.")
+    notes += layout.notes
+    if math.isfinite(layout.port_throat_ratio) and layout.port_throat_ratio < 1.0:
+        notes.append(f"! PORT AREA IS {layout.port_throat_ratio:.2f}× THE THROAT AREA — "
+                     "THE GRAIN, NOT THE NOZZLE, WOULD CHOKE THE FLOW.")
+    notes.append("PRINT AT 100% ON A4 LANDSCAPE FOR TRUE SCALE — CONFIRM WITH THE "
+                 "CHECK BAR BEFORE MEASURING OFF THIS SHEET.")
+    notes.extend(meta.notes)
+    return notes
+
+
+def save_grain_drawing(path, layout, meta=None, version="", dpi=300):
+    """Write the grain sheet to PNG / PDF / SVG at true A4-landscape size."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    fig = Figure(figsize=(SHEET_W / 25.4, SHEET_H / 25.4))
+    FigureCanvasAgg(fig)
+    build_grain_drawing(fig, layout, meta=meta, version=version)
+    fig.savefig(path, dpi=dpi, facecolor="white")
+    return path

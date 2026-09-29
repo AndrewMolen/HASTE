@@ -84,6 +84,19 @@ def build_report(result: SizingResult, cfg: MotorConfig, props_name: str) -> str
             f" (eff {cfg.propellant.cstar_eff:.2f})"
         )
     add(f"  Timestep                 : {cfg.dt * 1e3:.1f} ms")
+    g = cfg.grain
+    if g.layout == "sector":
+        add(f"  Grain                    : centre port %.2f mm + {g.n_sectors} sector ports; "
+            % (g.port_id * 1e3)
+            + f"ring/spoke/wall web {g.ring_web * 1e3:.2f}/{g.spoke_web * 1e3:.2f}/"
+            f"{g.wall_web * 1e3:.2f} mm")
+    else:
+        add(f"  Grain                    : {g.n_ports} round port(s) of {g.port_id * 1e3:.2f} mm")
+    add(f"  Initial port area        : {g.port_area(g.port_id) * 1e6:.0f} mm^2 "
+        f"(throat {cfg.nozzle.throat_area * 1e6:.0f} mm^2, ratio "
+        f"{g.port_area(g.port_id) / cfg.nozzle.throat_area:.2f})")
+    if cfg.valve_close_t is not None:
+        add(f"  Run valve closes at      : {cfg.valve_close_t:.2f} s")
     if result.model_recommendation:
         add("")
         add(f"  Regime note: {result.model_recommendation}")
@@ -138,7 +151,12 @@ def build_report(result: SizingResult, cfg: MotorConfig, props_name: str) -> str
     add(f"  Isp (delivered)          : {b.specific_impulse():.1f} s")
     if len(b.t):
         add(f"  Peak thrust              : {b.thrust.max():.0f} N")
-        add(f"  Port diameter            : {b.port_d[0] * 1e3:.1f} -> {b.port_d[-1] * 1e3:.1f} mm")
+        add(f"  Port diameter            : {b.port_d[0] * 1e3:.1f} -> {b.port_d[-1] * 1e3:.1f} mm"
+            + ("  (centre port)" if cfg.grain.layout == "sector" else ""))
+        if math.isfinite(result.web_used_frac):
+            add(f"  Web used                 : {result.regression_max * 1e3:.2f} of "
+                f"{cfg.grain.web * 1e3:.2f} mm ({result.web_used_frac * 100:.0f} %)"
+                + ("" if cfg.grain.web_is_exact else "  [nominal]"))
         add(f"  Tank pressure            : {b.P_tank[0] / BAR:.1f} -> {b.P_tank[-1] / BAR:.1f} bar")
         add(f"  Chamber pressure         : {b.P_chamber[0] / BAR:.1f} -> {b.P_chamber[-1] / BAR:.1f} bar")
     add("")

@@ -52,6 +52,11 @@ def save_config(
             "port_id_mm": cfg.grain.port_id * 1e3,
             "outer_d_mm": cfg.grain.outer_d * 1e3,
             "n_ports": cfg.grain.n_ports,
+            "layout": cfg.grain.layout,
+            "n_sectors": cfg.grain.n_sectors,
+            "ring_web_mm": cfg.grain.ring_web * 1e3,
+            "spoke_web_mm": cfg.grain.spoke_web * 1e3,
+            "wall_web_mm": cfg.grain.wall_web * 1e3,
         },
         "nozzle": {
             "throat_d_mm": cfg.nozzle.throat_d * 1e3,
@@ -88,6 +93,7 @@ def save_config(
             "chamber_volume_L": cfg.chamber_volume * 1e3,
             "regression_mode": cfg.regression_mode,
             "stop_at_liquid_exhausted": cfg.stop_at_liquid_exhausted,
+            "valve_close_s": cfg.valve_close_t,
             "tail_cutoff_frac": cfg.tail_cutoff_frac,
             "const_OF": cfg.const_OF,
             "initial_Pc_bar": (
@@ -173,7 +179,12 @@ def load_config(path: str) -> tuple[MotorConfig, SizingTarget, list[str]]:
                   ox_mass=t["ox_mass_kg"],
                   supercharge_P=None if sup is None else sup * 1e5),
         grain=Grain(length=g["length_mm"] / 1e3, port_id=g["port_id_mm"] / 1e3,
-                    outer_d=g["outer_d_mm"] / 1e3, n_ports=int(g["n_ports"])),
+                    outer_d=g["outer_d_mm"] / 1e3, n_ports=int(g["n_ports"]),
+                    layout=g.get("layout", "round"),
+                    n_sectors=int(g.get("n_sectors", 4)),
+                    ring_web=g.get("ring_web_mm", 0.0) / 1e3,
+                    spoke_web=g.get("spoke_web_mm", 0.0) / 1e3,
+                    wall_web=g.get("wall_web_mm", 0.0) / 1e3),
         nozzle=Nozzle(throat_d=n["throat_d_mm"] / 1e3,
                       expansion_ratio=n["expansion_ratio"],
                       Cd=n["Cd"], efficiency=n["efficiency"]),
@@ -194,6 +205,7 @@ def load_config(path: str) -> tuple[MotorConfig, SizingTarget, list[str]]:
                     else run["initial_Pc_bar"] * 1e5),
         stop_at_liquid_exhausted=run.get("stop_at_liquid_exhausted", True),
         tail_cutoff_frac=run.get("tail_cutoff_frac", 1.05),
+        valve_close_t=run.get("valve_close_s"),
     )
 
     td = data.get("target", {})

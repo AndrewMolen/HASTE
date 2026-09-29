@@ -328,6 +328,13 @@ def _line(x1, y1, x2, y2, layer) -> str:
             + _g(30, 0.0) + _g(11, float(x2)) + _g(21, float(y2)) + _g(31, 0.0))
 
 
+def _arc(x, y, r, start_deg, end_deg, layer) -> str:
+    """Counter-clockwise arc from ``start_deg`` to ``end_deg``."""
+    return (_g(0, "ARC") + _g(8, layer) + _g(10, float(x)) + _g(20, float(y))
+            + _g(30, 0.0) + _g(40, float(r)) + _g(50, float(start_deg))
+            + _g(51, float(end_deg)))
+
+
 def _point(x, y, layer) -> str:
     return (_g(0, "POINT") + _g(8, layer) + _g(10, float(x)) + _g(20, float(y))
             + _g(30, 0.0))
@@ -410,18 +417,29 @@ def write_dxf(path: str, layout: PlateLayout, meta: DrawingMeta | None = None,
         for i, s in enumerate(lines):
             parts.append(_text(-R, ty + (len(lines) - i - 1) * h * 1.8, h, s, "ANNOTATION"))
 
-    body = "".join(parts)
-
     # Extents, so the file opens zoomed to the drawing rather than to origin.
     span_y_lo = -(R * 1.3 + (layout.thickness + max(0.25 * R, 8.0) if include_section else 0))
     span_y_hi = R * 1.2 + (len(layout.rings) + 8) * max(R * 0.045, 1.2) * 1.8
+    write_dxf_document(path, "".join(parts), (-R * 1.3, span_y_lo), (R * 1.3, span_y_hi),
+                       _LAYERS)
+    return path
+
+
+def write_dxf_document(path: str, body: str, ext_min, ext_max, layer_defs) -> str:
+    """Wrap entity text in a minimal R12 document and write it to ``path``.
+
+    ``layer_defs`` is a list of ``(name, colour, linetype)``; the linetype must
+    be ``CONTINUOUS`` or ``DASHED``, the two this writer defines.
+    """
     header = (
         _g(0, "SECTION") + _g(2, "HEADER")
         + _g(9, "$ACADVER") + _g(1, "AC1009")
         + _g(9, "$INSUNITS") + _g(70, 4)          # 4 = millimetres
         + _g(9, "$MEASUREMENT") + _g(70, 1)       # 1 = metric
-        + _g(9, "$EXTMIN") + _g(10, -R * 1.3) + _g(20, span_y_lo) + _g(30, 0.0)
-        + _g(9, "$EXTMAX") + _g(10, R * 1.3) + _g(20, span_y_hi) + _g(30, 0.0)
+        + _g(9, "$EXTMIN") + _g(10, float(ext_min[0])) + _g(20, float(ext_min[1]))
+        + _g(30, 0.0)
+        + _g(9, "$EXTMAX") + _g(10, float(ext_max[0])) + _g(20, float(ext_max[1]))
+        + _g(30, 0.0)
         + _g(0, "ENDSEC")
     )
 
@@ -433,8 +451,8 @@ def write_dxf(path: str, layout: PlateLayout, meta: DrawingMeta | None = None,
         + _g(72, 65) + _g(73, 2) + _g(40, 15.0) + _g(49, 10.0) + _g(49, -5.0)
         + _g(0, "ENDTAB")
     )
-    layers = _g(0, "TABLE") + _g(2, "LAYER") + _g(70, len(_LAYERS))
-    for name, colour, lt in _LAYERS:
+    layers = _g(0, "TABLE") + _g(2, "LAYER") + _g(70, len(layer_defs))
+    for name, colour, lt in layer_defs:
         layers += (_g(0, "LAYER") + _g(2, name) + _g(70, 0)
                    + _g(62, colour) + _g(6, lt))
     layers += _g(0, "ENDTAB")

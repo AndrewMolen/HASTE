@@ -71,39 +71,106 @@ CHAMBER_MAX_SUBSTEPS = 256
 
 @dataclass
 class Grain:
-    """Cylindrical fuel grain with ``n_ports`` identical circular ports."""
+    """Cylindrical fuel grain.
+
+    Two port layouts are modelled:
+
+    ``'round'``
+        ``n_ports`` identical circular ports of diameter ``port_id``. Exact
+        for a single port; for several ports the web is a nominal
+        equal-area figure, because how close the ports come to the case
+        depends on where they sit, which this layout does not record.
+
+    ``'sector'``
+        A round centre port of diameter ``port_id`` surrounded by
+        ``n_sectors`` annular-sector ports, separated by constant-thickness
+        spokes. ``ring_web`` is the web between the centre port and the
+        sectors, ``spoke_web`` the spoke thickness, ``wall_web`` the web
+        between the sectors and the case. Area and perimeter are exact at every
+        regression depth until the ports meet (see :mod:`grain_geometry`).
+
+    Either way the simulation's state is ``d = port_id + 2 e``, where ``e`` is
+    the regression depth; for a sector grain ``d`` is the centre port's
+    current diameter.
+    """
 
     length: float = 0.40  #: m
-    port_id: float = 0.035  #: initial port diameter [m]
+    port_id: float = 0.035  #: initial port diameter [m] (centre port for 'sector')
     outer_d: float = 0.090  #: grain outer diameter [m]
-    n_ports: int = 1
+    n_ports: int = 1  #: round ports ('round' layout only)
+
+    layout: str = "round"  #: 'round' or 'sector'
+    n_sectors: int = 4
+    ring_web: float = 0.0  #: m, centre port to sectors ('sector' only)
+    spoke_web: float = 0.0  #: m, spoke thickness ('sector' only)
+    wall_web: float = 0.0  #: m, sectors to case ('sector' only)
+
+    # ---- sector geometry ----
+    @property
+    def _sector0(self) -> tuple[float, float]:
+        """Area and perimeter of one sector port at zero regression."""
+        from .grain_geometry import sector_port
+
+        r1 = 0.5 * self.port_id + self.ring_web
+        r2 = 0.5 * self.outer_d - self.wall_web
+        return sector_port(r1, r2, 0.5 * self.spoke_web, self.n_sectors)
+
+    def regression(self, d: float) -> float:
+        """Regression depth [m] at state ``d``."""
+        return 0.5 * (d - self.port_id)
 
     def port_area(self, d: float) -> float:
         """Total flow area of all ports [m^2]."""
+        if self.layout == "sector":
+            e = self.regression(d)
+            a0, p0 = self._sector0
+            return 0.25 * np.pi * d**2 + self.n_sectors * (a0 + p0 * e + np.pi * e * e)
         return self.n_ports * 0.25 * np.pi * d**2
 
     def burn_perimeter(self, d: float) -> float:
         """Total burning perimeter of all ports [m]."""
+        if self.layout == "sector":
+            e = self.regression(d)
+            _, p0 = self._sector0
+            return np.pi * d + self.n_sectors * (p0 + 2.0 * np.pi * e)
         return self.n_ports * np.pi * d
 
     def fuel_volume(self, d: float) -> float:
         """Remaining solid fuel volume [m^3]."""
-        return max(
-            0.25 * np.pi * (self.outer_d**2 - self.n_ports * d**2) * self.length, 0.0
-        )
+        return max((0.25 * np.pi * self.outer_d**2 - self.port_area(d)) * self.length, 0.0)
 
     def fuel_mass(self, d: float, rho: float) -> float:
         return rho * self.fuel_volume(d)
 
     @property
     def web(self) -> float:
-        """Available web thickness [m] (single-port exact, multi-port nominal)."""
+        """Regression depth [m] at which the fuel reaches the case.
+
+        Exact for a single round port and for the sector layout; for several
+        round ports it is the nominal equal-area figure (see class docstring).
+        """
+        if self.layout == "sector":
+            return self.wall_web
         if self.n_ports == 1:
             return 0.5 * (self.outer_d - self.port_id)
-        # Outer web to the case for a ring of ports on a bolt circle is
-        # geometry-dependent; report the equivalent-area web as a nominal value.
         d_final = np.sqrt(self.outer_d**2 / self.n_ports)
         return 0.5 * (d_final - self.port_id)
+
+    @property
+    def web_is_exact(self) -> bool:
+        return self.layout == "sector" or self.n_ports == 1
+
+    @property
+    def merge_depth(self) -> float | None:
+        """Regression depth [m] at which neighbouring ports meet, if modelled."""
+        if self.layout == "sector":
+            return 0.5 * min(self.ring_web, self.spoke_web)
+        return None
+
+    def burned_through(self, d: float) -> bool:
+        if self.layout == "sector":
+            return self.regression(d) >= self.wall_web
+        return self.n_ports * d**2 >= self.outer_d**2
 
     def validate(self) -> list[str]:
         errs = []
@@ -111,6 +178,15 @@ class Grain:
             errs.append("grain length must be positive")
         if self.port_id <= 0:
             errs.append("initial port diameter must be positive")
+        if self.layout == "sector":
+            from .grain_geometry import sector_errors
+
+            errs += sector_errors(self.outer_d, self.port_id, self.ring_web,
+                                  self.spoke_web, self.wall_web, self.n_sectors)
+            return errs
+        if self.layout != "round":
+            errs.append(f"unknown grain layout {self.layout!r} (expected 'round' or 'sector')")
+            return errs
         if self.n_ports < 1:
             errs.append("number of ports must be at least 1")
         if self.n_ports * self.port_id**2 >= self.outer_d**2:
@@ -244,6 +320,13 @@ class MotorConfig:
     chamber_volume: float = 0.0  #: m^3; 0 => port volume only (HRAP convention)
     stop_at_liquid_exhausted: bool = True
 
+    #: Commanded shutdown [s]: the run valve closes at this time and the burn
+    #: ends there. ``None`` lets the tank blow down naturally. Closure is
+    #: treated as instantaneous, which is what a hybrid allows -- shutting off
+    #: the oxidiser stops combustion -- and the fuel regression after closure
+    #: (a brief smoulder of the melt layer) is neglected.
+    valve_close_t: float | None = None
+
     #: Tail-off cutoff. Once the motor has lit, the run ends when chamber
     #: pressure falls back to this multiple of ambient. Without it a
     #: vapour-phase blowdown dribbles on until ``max_time``, producing a burn
@@ -281,6 +364,8 @@ class MotorConfig:
                 f"unknown regression mode {self.regression_mode!r} "
                 "(expected 'shifting' or 'constant_OF')"
             )
+        if self.valve_close_t is not None and self.valve_close_t <= 0:
+            errs.append("valve closing time must be positive")
         if self.chamber_mode not in CHAMBER_MODES:
             errs.append(
                 f"unknown chamber mode {self.chamber_mode!r} (expected one of "
@@ -477,7 +562,7 @@ def simulate(
     # makes the chamber take orders of magnitude longer to come up to pressure.
     # Matching it is required for any meaningful comparison against HRAP.
     if cfg.chamber_volume > 0.0:
-        solid_V = 0.25 * np.pi * (grain.outer_d**2 - grain.port_id**2) * grain.length
+        solid_V = grain.fuel_volume(grain.port_id)
         m_gas = max(1.225 * (cfg.chamber_volume - solid_V), 1e-9)
     else:
         m_gas = max(1.225 * grain.port_area(d) * grain.length, 1e-9)
@@ -497,8 +582,19 @@ def simulate(
     t = 0.0
     n_steps = int(cfg.max_time / dt)
 
+    merge = grain.merge_depth
+    if merge is not None and merge >= grain.web - 1e-9:
+        merge = None  # balanced webs: ports meet as the wall burns through
+    merge_noted = False
+
     for _ in range(n_steps):
         if m_ox <= 1e-6 or m_fuel <= 1e-9:
+            break
+        if cfg.valve_close_t is not None and t >= cfg.valve_close_t - 1e-9:
+            notes.append(
+                f"run valve closed at t = {t:.3f} s with {m_ox:.3f} kg oxidiser "
+                "left in the tank"
+            )
             break
         if not props.in_range(T):
             notes.append(
@@ -625,9 +721,16 @@ def simulate(
         m_fuel = max(m_fuel - mdot_f * dt, 0.0)
         t += dt
 
-        if grain.n_ports * d**2 >= grain.outer_d**2:
+        if grain.burned_through(d):
             notes.append(f"fuel web burned through at t = {t:.3f} s")
             break
+        if merge is not None and not merge_noted and grain.regression(d) >= merge:
+            merge_noted = True
+            notes.append(
+                f"ports merged at t = {t:.3f} s ({merge * 1e3:.2f} mm regression), "
+                "before the wall web burned through; port area and perimeter after "
+                "this point are approximate"
+            )
     else:
         notes.append(
             f"simulation hit the {cfg.max_time:.0f} s time limit before the "

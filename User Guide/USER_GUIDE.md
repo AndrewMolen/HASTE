@@ -262,6 +262,16 @@ scroll away.
 | Oxidiser mass | 7.0 kg | Must leave both liquid and vapour present — the tool rejects a liquid-full or vapour-only fill. |
 | Supercharge P | *(blank)* | Blank = self-pressurising. Enter absolute bar for a pressurant-fed system. |
 | Ambient pressure | 1.01325 bar | Back pressure for thrust. |
+| Valve close time | *(blank)* | Commanded shutdown. The run valve closes here and the burn ends. Blank = blow down naturally. |
+
+**Closing the valve before the liquid runs out.** Once the tank is on vapour,
+flux and thrust collapse but the fuel keeps regressing: on V2.2 the ~3 s vapour
+tail delivers ~13% of the impulse and uses a fifth to a quarter of the web.
+Closing the valve just before liquid depletion (the report gives the time on a
+run with the field blank) keeps the high-pressure part of the burn and gives
+the web back. What it costs: a pressurised tank of vapour to vent remotely
+afterwards, and a valve closing on liquid -- a slightly slower-closing valve
+avoids the pressure spike. Closure is modelled as instantaneous.
 
 **Fill temperature is not a minor input.** N2O vapour pressure roughly doubles
 between 0 °C and 30 °C. Sizing for 20 °C and flying at 30 °C gives noticeably
@@ -303,10 +313,43 @@ integer, reporting the resulting area error.
 | Grain length | 450 mm | |
 | Initial port dia | 38 mm | Starting bore. |
 | Grain outer dia | 92 mm | Sets available web. |
-| Number of ports | 1 | Multi-port uses N identical circular ports. |
+| Number of ports | 1 | Round layout: N identical circular ports. |
+| Port layout | round | `round` or `sector` (below). |
+| Sector ports | 4 | Sector layout only. |
+| Ring / Spoke / Wall web | 0 mm | Sector layout only. Webs between centre port and sectors, between sectors, and between sectors and the case. |
 
-> Multi-port geometry is approximate — the web is reported as a nominal
-> equivalent-area value, not true bolt-circle geometry. Single port is exact.
+**Round, several ports: the web is nominal.** The model knows the port count
+and diameter, not where the ports sit, so it reports an equal-area web --
+the regression at which the ports' total area would fill the grain. The real
+web to the case is always thinner. Five ⌀17.78 ports in an ⌀85.85 grain have a
+nominal web of 10.31 mm; on the best circle they can sit on, the wall web is
+only **7.00 mm**. The report marks this web `[nominal]`, and the drawing places
+the ports on that best circle and says so.
+
+**Sector layout.** A round centre port (the *Initial port dia* field) plus N
+annular-sector ports separated by constant-thickness spokes. Its area and
+perimeter are exact at every regression depth until the ports meet -- for a
+sector port the regressed area is *A₀ + P₀e + πe²* whatever its shape
+(Steiner's formula) -- so its web is exact, not nominal. For the same port area
+it uses the diameter better: on V2.2 it gives an 8.76 mm wall web against 7.00
+for the five round ports, at the cost of 26% more burning surface (so more fuel
+flow and a lower O/F).
+
+**Balance sector webs** converts the current grain to a sector layout with the
+same total port area -- so the initial oxidiser flux does not change -- and sets:
+
+* the spokes and ring web to twice the wall web, because they burn from both
+  faces. Every web then burns out at the same depth, so no port breaks into its
+  neighbour early and no web is left behind as a sliver;
+* the centre port so its hydraulic diameter matches the sector ports', so the
+  oxidiser divides between them in proportion to area.
+
+**Don't shrink ports to buy web.** At fixed grain OD, extra web only comes from
+less port area. That raises oxidiser flux, which raises regression per unit
+surface (so O/F barely recovers), and once port area falls toward the throat
+area the grain rather than the nozzle chokes the flow -- a large pressure drop
+along the grain that this model does not capture. The report notes a
+port-to-throat ratio below 2 and warns below 1.
 
 ## 2.4 Propellant / regression
 
@@ -502,7 +545,21 @@ oxidiser flow and a shifted O/F. Twenty holes drilled 0.02 mm oversize is not a
 rounding error, it is a different motor. Decide the tolerance before the plate
 is cut.
 
-## 3.5 Warning decoder
+## 3.5 The grain drawing tab
+
+The same kind of A4 sheet for the fuel grain: a cross-section from the
+forward end, section A–A along the grain, design data (port area, perimeter,
+burning surface, wall web, web between ports, port/throat ratio, fuel mass),
+notes and a title block. It draws from the inputs alone, so it works before a
+sizing run; after one, a note states the simulated regression against the wall
+web. **Export DXF** writes the section with sector ports as true ARC and LINE
+entities -- ready to dimension, or to cut a casting mandrel from -- on layers
+`GRAIN_OUTLINE`, `PORTS`, `CENTRELINES`, `SECTION` and `ANNOTATION`.
+
+Port corners are drawn sharp, as designed. Cast them with small fillets
+(the sheet quotes the port area an R2 fillet costs -- about 1%).
+
+## 3.6 Warning decoder
 
 | Message | Meaning | Do |
 |---|---|---|

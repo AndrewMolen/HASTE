@@ -149,6 +149,9 @@ class SizingResult:
     mean_dP_fraction: float = float("nan")
     dP_margin_ok: bool = True
     choked_fraction: float = float("nan")
+    #: Deepest regression reached [m] and the fraction of the web it uses.
+    regression_max: float = float("nan")
+    web_used_frac: float = float("nan")
 
     warnings: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -725,6 +728,50 @@ def _populate_metrics(
                     "range. At low flux, radiation and non-uniform burning matter and "
                     "the a*G^n law under-predicts."
                 )
+
+    # Grain web. The burn ends at burn-through, so a grain that runs out of web
+    # still "completes" -- the number has to be checked, not inferred.
+    grain = cfg.grain
+    if len(burn.port_d) and grain.web > 0:
+        e_max = float(grain.regression(burn.port_d[-1]))
+        result.regression_max = e_max
+        result.web_used_frac = e_max / grain.web
+        kind = "" if grain.web_is_exact else " (nominal equal-area web)"
+        if any("burned through" in n for n in burn.notes):
+            result.warnings.append(
+                f"GRAIN BURN-THROUGH: regression reached the {grain.web * 1e3:.2f} mm "
+                f"wall web{kind} before the burn ended. Reduce the oxidiser load, close "
+                "the run valve earlier, or thicken the wall web."
+            )
+        elif result.web_used_frac > 0.85:
+            result.warnings.append(
+                f"thin web margin: regression reaches {e_max * 1e3:.2f} mm of the "
+                f"{grain.web * 1e3:.2f} mm wall web{kind} "
+                f"({result.web_used_frac * 100:.0f}%). With literature regression "
+                "coefficients that is inside the uncertainty -- a faster fuel burns "
+                "through."
+            )
+        ratio = grain.port_area(grain.port_id) / cfg.nozzle.throat_area
+        if ratio < 1.0:
+            result.warnings.append(
+                f"PORTS SMALLER THAN THROAT: initial port area is {ratio:.2f}x the throat "
+                "area, so the grain rather than the nozzle chokes the flow at ignition. "
+                "Expect a large pressure drop along the grain and a head-end pressure "
+                "well above the one reported here, which this model does not capture."
+            )
+        elif ratio < 2.0:
+            result.notes.append(
+                f"initial port-to-throat area ratio is {ratio:.2f}; the usual guidance is "
+                "at least ~2 to keep the gas speed in the ports low. Below it, expect "
+                "some head-end pressure rise and faster regression near the aft end."
+            )
+        if not grain.web_is_exact:
+            result.notes.append(
+                "multi-port round grain: the web is an equal-area nominal figure, not the "
+                "distance from the ports to the case, which depends on where the ports "
+                "sit. The real wall web is usually thinner. Use the sector layout for "
+                "an exact web."
+            )
 
     # O/F excursion across the burn.
     ok_of = np.isfinite(burn.OF)

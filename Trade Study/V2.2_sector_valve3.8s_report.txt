@@ -1,0 +1,101 @@
+==============================================================================
+  N2O / PARAFFIN HYBRID -- INJECTOR SIZING REPORT
+  generated 2026-09-29 13:04:02
+==============================================================================
+
+RECOMMENDED INJECTOR
+------------------------------------------------------------------------------
+  Orifice count            : 40
+  Orifice diameter         : 1.200 mm
+  Total geometric area     : 45.24 mm^2
+  Effective area (Cd*A)    : 31.67 mm^2
+  Discharge coefficient    : 0.700
+  Plate thickness          : 12.70 mm
+  Orifice L/D              : 10.58
+
+  Ideal Cd*A from solver   : 31.667 mm^2
+  Realised Cd*A            : 31.667 mm^2
+  Area rounding error      : +0.00 %
+
+MODEL AND ASSUMPTIONS
+------------------------------------------------------------------------------
+  Injector flow model      : HEM
+  N2O property source      : ESDU 91022
+  Chamber pressure model   : quasi-steady
+  Propellant               : Paraffin
+  Regression law           : rdot[mm/s] = 0.0304 * G_ox^0.681
+  Fuel density             : 900 kg/m^3
+  c* source                : CEA/RPA table from HRAP propellant config
+  Timestep                 : 1.0 ms
+  Grain                    : centre port 14.14 mm + 4 sector ports; ring/spoke/wall web 17.53/17.53/8.76 mm
+  Initial port area        : 1241 mm^2 (throat 730 mm^2, ratio 1.70)
+  Run valve closes at      : 3.80 s
+
+  Regime note: L/D = 10.58: long orifice. The flow has time to approach equilibrium, so HEM is the more appropriate model.
+
+DESIGN POINT (t = 0)
+------------------------------------------------------------------------------
+  Tank temperature         : 23.85 C
+  Tank pressure            : 55.17 bar
+  Chamber pressure         : 25.43 bar
+  Injector dP              : 29.74 bar (116.9 % of Pc)
+  Oxidiser mass flow       : 0.9655 kg/s
+  Fuel mass flow           : 0.1590 kg/s
+  O/F                      : 6.073
+  Port mass flux G_ox      : 777.7 kg/m^2/s
+  Thrust                   : 2301 N
+
+BURN SUMMARY
+------------------------------------------------------------------------------
+  Objective                : chamber_pressure
+  Target chamber pressure  : 25.00 bar
+  Target O/F               : 8.000
+  Achieved mean O/F        : 7.503
+  O/F error vs target      : -6.22 %
+  O/F range over burn      : 6.07 -> 8.35
+  Burn time                : 3.80 s
+  Oxidiser consumed        : 3.427 kg
+  Fuel consumed            : 0.457 kg
+  Total impulse            : 7890 N.s
+  Isp (delivered)          : 207.1 s
+  Peak thrust              : 2301 N
+  Port diameter            : 14.1 -> 26.8 mm  (centre port)
+  Web used                 : 6.33 of 8.76 mm (72 %)
+  Tank pressure            : 55.2 -> 42.5 bar
+  Chamber pressure         : 25.4 -> 21.0 bar
+
+MARGINS AND FLAGS
+------------------------------------------------------------------------------
+  Required dP margin       : 20 % of Pc
+  Minimum dP over burn     : 102.1 %
+  Mean dP over burn        : 110.4 %
+  dP margin satisfied      : YES
+  Choked fraction of burn  : 100 %
+  Solver converged         : YES
+
+WARNINGS
+------------------------------------------------------------------------------
+  [!] oxidiser flux peaks at 778 kg/m^2/s, above the ~700 kg/m^2/s upper end of the range paraffin regression correlations are normally fitted over, for 4% of the liquid phase. The regression law is being extrapolated, so the fuel flow and O/F here carry more uncertainty than the coefficients alone imply. G_ox is set by the grain port area, not by the injector -- open the ports or accept the extrapolation.
+  [!] instantaneous O/F deviates from target by up to 24% during the burn. A single fixed orifice area cannot track the target across blowdown; consider whether the excursion is acceptable at the ends of the burn.
+
+NOTES
+------------------------------------------------------------------------------
+  -  forward run of the entered geometry -- no sizing was performed
+  -  run valve closed at t = 3.800 s with 1.052 kg oxidiser left in the tank
+  -  initial port-to-throat area ratio is 1.70; the usual guidance is at least ~2 to keep the gas speed in the ports low. Below it, expect some head-end pressure rise and faster regression near the aft end.
+
+HRAP CROSS-CHECK
+------------------------------------------------------------------------------
+  HRAP inj_N               : 40
+  HRAP inj_D               : 1.2000 mm
+  HRAP inj_Cd              : 0.7000
+  HRAP inj_CdA (per hole)  : 7.916813e-07 m^2
+
+  HRAP models the liquid injector as single-phase incompressible
+  (mdot = Cd*N*A*sqrt(2*rho_l*dP)). If this design was sized with HEM or
+  Dyer, HRAP will predict a HIGHER oxidiser flow than this tool for the
+  same geometry. Re-run here with model = SPI to reproduce HRAP exactly.
+
+  -> This design was sized with HEM, so expect that discrepancy.
+
+==============================================================================
